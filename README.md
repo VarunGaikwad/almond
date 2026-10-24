@@ -65,9 +65,22 @@ The migration command loads `.env` followed by `.env.local` overrides and prefer
 
 `GET /api/status` only reports whether the required variables exist; it does **not** prove database connectivity or that migrations have run.
 
+### Password recovery
+
+Configure these server-only variables to enable reset emails through Resend:
+
+```dotenv
+RESEND_API_KEY=re_your_api_key
+AUTH_EMAIL_FROM=Almond <hello@your-verified-domain.example>
+```
+
+Verify the sender domain in Resend, set these variables locally and on your host, and restart. No additional package or database migration is needed. Use **Forgot password?** on `/login` (or visit `/forgot-password`). Links expire after one hour and are single-use. The new password must be 12–128 characters. A successful reset revokes existing online sessions and requires signing in again; it cannot erase already-saved offline data on other devices. Reset requests are limited to three per minute per IP.
+
+Delivery is tested with a mocked Resend endpoint; verify a real inbox round trip after configuration before relying on recovery.
+
 ### Authentication limitations
 
-Email/password sign-up and login are wired to Better Auth, with database-backed auth rate limits and server-side sessions. Email verification, password-recovery delivery, OAuth, account deletion, and administrative recovery are **not implemented**. Do not open public registration or depend on this app for irreplaceable records before these controls and live security/integration testing are completed. An email address is not verified proof of ownership in this release.
+Email/password sign-up, login, and password recovery are wired to Better Auth, with database-backed auth rate limits and server-side sessions. Email verification, OAuth, account deletion, and administrative recovery are **not implemented**. Do not open public registration or depend on this app for irreplaceable records before these controls and live security/integration testing are completed. An email address is not verified proof of ownership in this release.
 
 ## Offline and synchronization behavior
 

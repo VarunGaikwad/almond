@@ -5,10 +5,15 @@ import { ArrowRight, Eye, EyeOff, Leaf, WifiOff } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { AlmondMark } from './ui';
 
-export default function AuthPage({ mode, unavailable, onRetry }: {
-  mode: 'login' | 'register'; unavailable?: string; onRetry: () => void;
+export default function AuthPage({ mode, unavailable, onRetry, token, invalidToken }: {
+  mode: 'login' | 'register' | 'forgot' | 'reset'; unavailable?: string; onRetry?: () => void;
+  token?: string; invalidToken?: boolean;
 }) {
   const signup = mode === 'register';
+  const forgot = mode === 'forgot';
+  const reset = mode === 'reset';
+  const recovery = forgot || reset;
+  const [success, setSuccess] = useState(false);
   const [busy, setBusy] = useState(false);
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState('');
@@ -21,8 +26,20 @@ export default function AuthPage({ mode, unavailable, onRetry }: {
     const fields = new FormData(event.currentTarget);
     const name = String(fields.get('name') ?? '').trim();
     if (signup && !name) { setError('Enter your name to create an account.'); return; }
+    if (reset && fields.get('password') !== fields.get('confirmPassword')) { setError('Passwords do not match.'); return; }
     setBusy(true); setError('');
     try {
+      if (recovery) {
+        const result = forgot
+          ? await authClient.requestPasswordReset({ email: String(fields.get('email')).trim(), redirectTo: new URL('/reset-password', window.location.origin).href })
+          : await authClient.resetPassword({ token, newPassword: String(fields.get('password')) });
+        if (result.error) throw new Error(result.error.code === 'INVALID_TOKEN'
+          ? 'This reset link is invalid or has expired. Request a new link.'
+          : result.error.message ?? 'Could not complete your request. Please try again.');
+        setSuccess(true);
+        setBusy(false);
+        return;
+      }
       const credentials = { email: String(fields.get('email')).trim(), password: String(fields.get('password')) };
       const result = signup ? await authClient.signUp.email({ ...credentials, name }) : await authClient.signIn.email(credentials);
       if (result.error) throw new Error(result.error.message ?? 'Please check your details and try again.');
@@ -44,17 +61,19 @@ export default function AuthPage({ mode, unavailable, onRetry }: {
     <section className="auth-panel" aria-labelledby="auth-title">
       <div className="auth-content">
         <span className="eyebrow">YOUR PERSONAL SPACE</span>
-        <h1 id="auth-title">{signup ? 'A fresh start with Almond.' : 'Welcome back to your space.'}</h1>
-        <p className="auth-intro">{signup ? 'Create an account and take the first small step.' : 'Sign in to pick up where you left off.'}</p>
-        {unavailable ? <div className="auth-unavailable"><p role="alert">{unavailable}</p><button className="button primary" onClick={onRetry}>Try again</button></div> : <form className="form-stack auth-form" onSubmit={submit} aria-busy={busy}>
+        <h1 id="auth-title">{forgot ? 'Forgot your password?' : reset ? 'Choose a new password.' : signup ? 'A fresh start with Almond.' : 'Welcome back to your space.'}</h1>
+        <p className="auth-intro">{forgot ? 'Enter your email and we’ll send you a reset link.' : reset ? 'Use 12–128 characters for your new password.' : signup ? 'Create an account and take the first small step.' : 'Sign in to pick up where you left off.'}</p>
+        {success ? <p role="status">{forgot ? 'If an account exists for that email, you’ll receive a reset link. Check your inbox and spam folder.' : 'Your password has been reset. Sign in with your new password.'}</p> : reset && (!token || invalidToken) ? <p role="alert">This reset link is invalid or has expired. <a href="/forgot-password">Request a new link</a>.</p> : unavailable ? <div className="auth-unavailable"><p role="alert">{unavailable}</p><button className="button primary" onClick={onRetry}>Try again</button></div> : <form className="form-stack auth-form" onSubmit={submit} aria-busy={busy}>
           {signup && <label htmlFor="auth-name">Your name<input id="auth-name" name="name" autoComplete="name" maxLength={100} required disabled={busy}/></label>}
-          <label htmlFor="auth-email">Email address<input id="auth-email" name="email" type="email" autoComplete="email" placeholder="you@example.com" required disabled={busy}/></label>
-          <div className="auth-password-field"><label htmlFor="auth-password">Password</label><div className="auth-password"><input id="auth-password" name="password" type={visible ? 'text' : 'password'} autoComplete={signup ? 'new-password' : 'current-password'} minLength={12} maxLength={128} required disabled={busy} aria-describedby="password-hint"/><button type="button" className="icon-button" aria-label={visible ? 'Hide password' : 'Show password'} aria-pressed={visible} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={19}/> : <Eye size={19}/>}</button></div></div>
-          <p id="password-hint" className="field-hint">{signup ? 'Use 12–128 characters. ' : ''}Password recovery is not available yet. Keep your password somewhere safe.</p>
+          {!reset && <label htmlFor="auth-email">Email address<input id="auth-email" name="email" type="email" autoComplete="email" placeholder="you@example.com" required disabled={busy}/></label>}
+          {!forgot && <><div className="auth-password-field"><label htmlFor="auth-password">Password</label><div className="auth-password"><input id="auth-password" name="password" type={visible ? 'text' : 'password'} autoComplete={signup || reset ? 'new-password' : 'current-password'} minLength={12} maxLength={128} required disabled={busy} aria-describedby="password-hint"/><button type="button" className="icon-button" aria-label={visible ? 'Hide password' : 'Show password'} aria-pressed={visible} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={19}/> : <Eye size={19}/>}</button></div></div>
+          <p id="password-hint" className="field-hint">{signup || reset ? 'Use 12–128 characters.' : <a href="/forgot-password">Forgot password?</a>}</p>
+          {reset && <label htmlFor="auth-confirm-password">Confirm password<input id="auth-confirm-password" name="confirmPassword" type={visible ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required disabled={busy}/></label>}</>}
           {error && <p ref={errorRef} tabIndex={-1} className="form-error" role="alert">{error}</p>}
-          <button className="button primary auth-submit" disabled={busy}>{busy ? 'One moment…' : signup ? 'Create account' : 'Sign in'}{!busy && <ArrowRight size={18} aria-hidden="true"/>}</button>
+          <button className="button primary auth-submit" disabled={busy}>{busy ? 'One moment…' : forgot ? 'Send reset link' : reset ? 'Reset password' : signup ? 'Create account' : 'Sign in'}{!busy && <ArrowRight size={18} aria-hidden="true"/>}</button>
         </form>}
-        <p className="auth-switch">{signup ? 'Already have an account?' : 'New to Almond?'} <a href={signup ? '/login' : '/register'}>{signup ? 'Sign in' : 'Create an account'}</a></p>
+        {reset && !success && <p className="auth-switch"><a href="/forgot-password">Request a new reset link</a></p>}
+        {recovery ? <p className="auth-switch"><a href="/login">Back to sign in</a></p> : <p className="auth-switch">{signup ? 'Already have an account?' : 'New to Almond?'} <a href={signup ? '/login' : '/register'}>{signup ? 'Sign in' : 'Create an account'}</a></p>}
         <div className="auth-offline-note"><WifiOff size={18} aria-hidden="true"/><p>Sign in once, then keep going offline on this browser. Saved data is unencrypted; protect access to your device.</p></div>
       </div>
     </section>

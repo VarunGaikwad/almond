@@ -138,9 +138,9 @@ test('pending changes prevent sign-out', async ({ page, context }) => {
 
 test('authentication pages are accessible in both themes and fit narrow screens', async ({ page }, testInfo) => {
   await mockCloud(page, false);
-  for (const route of ['/login', '/register']) {
+  for (const route of ['/login', '/register', '/forgot-password', '/reset-password?token=test-token']) {
     await page.goto(route);
-    await expect(page.getByLabel('Email address')).toBeVisible();
+    await expect(page.getByLabel(route.startsWith('/reset-password') ? 'Password' : 'Email address', { exact: true })).toBeVisible();
     for (const theme of ['light', 'dark']) {
       await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
       await page.emulateMedia({ reducedMotion: 'reduce' });
