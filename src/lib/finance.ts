@@ -2,54 +2,134 @@ import { z } from 'zod';
 
 const id = z.string().min(1).max(100);
 const text = z.string().trim().min(1).max(100);
-// A bounded USD-only first release keeps all aggregate cents within safe integers.
+export const currencies = ['USD', 'JPY', 'INR'] as const;
+export type Currency = typeof currencies[number];
+const currencySchema = z.enum(currencies).optional();
+export function currencyOf(record?: { currency?: Currency }): Currency { return record?.currency ?? 'USD'; }
+export function minorUnit(currency: Currency = 'USD') { return currency === 'JPY' ? 1 : 100; }
+export function moneyInput(amount: number, currency: Currency = 'USD') { return (amount / minorUnit(currency)).toFixed(currency === 'JPY' ? 0 : 2); }
+// Bounded integer minor units keep aggregates within safe integers.
 const cents = z.number().int().min(0).max(100_000_000_000);
 export const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   const parsed = new Date(`${value}T12:00:00Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }, 'Choose a valid date');
+// Manual rates are reporting metadata, never ledger amounts. Keep validation here
+// so imports, backups and sync share the boundary without an exchange-helper cycle.
+export const exchangeRateSchema = z.object({
+  id, source: z.enum(currencies), target: z.enum(currencies),
+  rate: z.string().regex(/^\d{1,12}(\.\d{1,8})?$/, 'Enter a decimal rate with up to 12 whole digits and 8 decimal places')
+    .refine(value => /[1-9]/.test(value), 'Rate must be positive'),
+  asOf: dateSchema.refine(value => value <= localDate(), 'Rate date must not be in the future'),
+}).strict().superRefine((rate, ctx) => {
+  if (rate.source === rate.target) ctx.addIssue({ code: 'custom', message: 'Choose different source and target currencies' });
+});
+export type ExchangeRate = z.infer<typeof exchangeRateSchema>;
 export const accountSchema = z.object({
-  id, name: text, type: z.enum(['checking', 'savings', 'cash', 'credit']),
+  id, name: text, currency: currencySchema, archived: z.boolean().optional(), type: z.enum(['checking', 'savings', 'cash', 'credit']),
   openingBalance: z.number().int().min(-100_000_000_000).max(100_000_000_000),
   color: z.string().regex(/^#[a-fA-F0-9]{6}$/),
-});
-export const categorySchema = z.object({ id, name: text, color: z.string().regex(/^#[a-fA-F0-9]{6}$/), icon: z.enum(['food', 'shopping', 'home', 'transport', 'health', 'fun', 'income', 'other']) });
+}).strict();
+export const categorySchema = z.object({ id, name: text, color: z.string().regex(/^#[a-fA-F0-9]{6}$/), icon: z.enum(['food', 'shopping', 'home', 'transport', 'health', 'fun', 'income', 'other']) }).strict();
 export const transactionSchema = z.object({
   id, title: text, amount: cents.refine(n => n > 0, 'Amount must be greater than zero'),
   type: z.enum(['expense', 'income', 'transfer']), accountId: id,
   toAccountId: id.optional(), categoryId: id.optional(), date: dateSchema,
   notes: z.string().max(1000).optional(),
-}).superRefine((t, ctx) => {
+  scheduleId: id.optional(), scheduledFor: dateSchema.optional(),
+}).strict().superRefine((t, ctx) => {
   if (t.type === 'transfer' && (!t.toAccountId || t.toAccountId === t.accountId)) {
     ctx.addIssue({ code: 'custom', message: 'Choose a different destination account', path: ['toAccountId'] });
   }
   if (t.type !== 'transfer' && !t.categoryId) ctx.addIssue({ code: 'custom', message: 'Choose a category', path: ['categoryId'] });
 });
 export const budgetSchema = z.object({
-  id, categoryId: id, amount: cents.refine(n => n > 0),
-  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  id, categoryId: id.optional(), categoryIds: z.array(id).min(1).max(200).optional(),
+  currency: currencySchema, amount: cents.refine(n => n > 0),
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
+  startDate: dateSchema.optional(), endDate: dateSchema.optional(),
+  transactionIds: z.array(id).max(10000).optional(),
+}).strict().superRefine((b, ctx) => {
+  if (!b.categoryId && !b.categoryIds?.length) ctx.addIssue({ code: 'custom', message: 'Choose at least one category' });
+  if (b.categoryId && b.categoryIds) ctx.addIssue({ code: 'custom', message: 'Use a category or a category list, not both' });
+  if ((!b.startDate || !b.endDate) && (b.startDate || b.endDate || !b.month)) ctx.addIssue({ code: 'custom', message: 'Choose a month or a complete date range' });
+  if (b.startDate && b.endDate && b.startDate > b.endDate) ctx.addIssue({ code: 'custom', message: 'End date must not precede start date' });
+  for (const links of [b.categoryIds, b.transactionIds]) if (links && new Set(links).size !== links.length) ctx.addIssue({ code: 'custom', message: 'Duplicate budget links' });
 });
+export const goalSchema = z.object({
+  id, name: text, kind: z.enum(['saving', 'spending']), currency: currencySchema,
+  target: cents.refine(n => n > 0, 'Target must be greater than zero'),
+  targetDate: dateSchema.optional(), transactionIds: z.array(id).max(10000),
+}).strict().superRefine((g, ctx) => {
+  if (new Set(g.transactionIds).size !== g.transactionIds.length) ctx.addIssue({ code: 'custom', message: 'Duplicate goal links' });
+});
+export type Goal = z.infer<typeof goalSchema>;
+export const scheduleSchema = z.object({
+  id, title: text, amount: cents.refine(n => n > 0, 'Amount must be greater than zero'),
+  type: z.enum(['expense', 'income']), accountId: id, categoryId: id,
+  frequency: z.enum(['once', 'daily', 'weekly', 'monthly', 'yearly']),
+  anchorDate: dateSchema, nextDue: dateSchema.nullable(), endDate: dateSchema.optional(),
+  notes: z.string().max(1000).optional(),
+}).strict().superRefine((s, ctx) => {
+  if (s.nextDue && (s.nextDue < s.anchorDate || (s.endDate && s.nextDue > s.endDate))) ctx.addIssue({ code: 'custom', message: 'Next due date must be between the start and end dates' });
+  if (s.endDate && s.endDate < s.anchorDate) ctx.addIssue({ code: 'custom', message: 'End date must not precede the start date' });
+});
+export type Schedule = z.infer<typeof scheduleSchema>;
 export const financeSchema = z.object({
   accounts: z.array(accountSchema).max(100),
   categories: z.array(categorySchema).max(200),
   transactions: z.array(transactionSchema).max(10000),
   budgets: z.array(budgetSchema).max(1000),
-}).superRefine((data, ctx) => {
+  schedules: z.array(scheduleSchema).max(1000).optional(),
+  goals: z.array(goalSchema).max(1000).optional(),
+  exchangeRates: z.array(exchangeRateSchema).max(6).optional(),
+}).strict().superRefine((data, ctx) => {
   for (const [key, rows] of Object.entries(data)) {
-    if (new Set(rows.map(row => row.id)).size !== rows.length) ctx.addIssue({ code: 'custom', message: `Duplicate ${key} IDs` });
+    if (new Set((rows ?? []).map(row => row.id)).size !== (rows ?? []).length) ctx.addIssue({ code: 'custom', message: `Duplicate ${key} IDs` });
+  }
+  const pairs = new Set<string>();
+  for (const rate of data.exchangeRates ?? []) {
+    const pair = `${rate.source}:${rate.target}`;
+    if (pairs.has(pair)) ctx.addIssue({ code: 'custom', message: 'Duplicate directed exchange-rate pair', path: ['exchangeRates'] });
+    pairs.add(pair);
   }
   const accounts = new Set(data.accounts.map(a => a.id));
   const categories = new Set(data.categories.map(c => c.id));
   for (const t of data.transactions) {
     if (!accounts.has(t.accountId) || (t.type === 'transfer' && !accounts.has(t.toAccountId!))) ctx.addIssue({ code: 'custom', message: 'Transaction references an unknown account' });
+    if (t.type === 'transfer' && currencyOf(data.accounts.find(a => a.id === t.accountId)) !== currencyOf(data.accounts.find(a => a.id === t.toAccountId))) ctx.addIssue({ code: 'custom', message: 'Transfers require accounts with the same currency' });
     if (t.type !== 'transfer' && !categories.has(t.categoryId!)) ctx.addIssue({ code: 'custom', message: 'Transaction references an unknown category' });
+  }
+  for (const s of data.schedules ?? []) {
+    if (!accounts.has(s.accountId)) ctx.addIssue({ code: 'custom', message: 'Schedule references an unknown account' });
+    if (!categories.has(s.categoryId)) ctx.addIssue({ code: 'custom', message: 'Schedule references an unknown category' });
+  }
+  const occurrences = new Set<string>();
+  for (const t of data.transactions) {
+    if (Boolean(t.scheduleId) !== Boolean(t.scheduledFor)) ctx.addIssue({ code: 'custom', message: 'Incomplete schedule occurrence reference' });
+    if (t.scheduleId && t.scheduledFor) {
+      const key = JSON.stringify([t.scheduleId, t.scheduledFor]);
+      if (occurrences.has(key)) ctx.addIssue({ code: 'custom', message: 'Duplicate schedule occurrence' });
+      occurrences.add(key);
+    }
   }
   const budgetKeys = new Set<string>();
   for (const b of data.budgets) {
-    if (!categories.has(b.categoryId)) ctx.addIssue({ code: 'custom', message: 'Budget references an unknown category' });
-    const key = `${b.month}:${b.categoryId}`;
-    if (budgetKeys.has(key)) ctx.addIssue({ code: 'custom', message: 'This category already has a budget for this month' });
-    budgetKeys.add(key);
+    const ids = b.categoryIds ?? [b.categoryId!];
+    if (ids.some(id => !categories.has(id))) ctx.addIssue({ code: 'custom', message: 'Budget references an unknown category' });
+    if (!b.startDate && b.categoryId) {
+      const key = `${b.month}:${b.categoryId}:${currencyOf(b)}`;
+      if (budgetKeys.has(key)) ctx.addIssue({ code: 'custom', message: 'This category already has a budget for this month' });
+      budgetKeys.add(key);
+    }
+    for (const id of b.transactionIds ?? []) {
+      const t = data.transactions.find(t => t.id === id);
+      if (!t || t.type !== 'expense' || !ids.includes(t.categoryId!) || currencyOf(data.accounts.find(a => a.id === t.accountId)) !== currencyOf(b)) ctx.addIssue({ code: 'custom', message: 'Budget links require posted expenses in its categories and currency' });
+    }
+  }
+  for (const g of data.goals ?? []) for (const id of g.transactionIds) {
+    const t = data.transactions.find(t => t.id === id);
+    if (!t || t.type !== (g.kind === 'saving' ? 'income' : 'expense') || currencyOf(data.accounts.find(a => a.id === t.accountId)) !== currencyOf(g)) ctx.addIssue({ code: 'custom', message: 'Goal links require posted transactions with matching type and currency' });
   }
 });
 export type Account = z.infer<typeof accountSchema>;
@@ -58,17 +138,44 @@ export type Transaction = z.infer<typeof transactionSchema>;
 export type Budget = z.infer<typeof budgetSchema>;
 export type FinanceData = z.infer<typeof financeSchema>;
 
-export function parseMoney(input: string, allowNegative = false): number {
+export function deleteTransaction(data: FinanceData, id: string): void {
+  data.transactions = data.transactions.filter(t => t.id !== id);
+  for (const b of data.budgets) if (b.transactionIds) b.transactionIds = b.transactionIds.filter(link => link !== id);
+  for (const g of data.goals ?? []) g.transactionIds = g.transactionIds.filter(link => link !== id);
+}
+
+export function accountHasTransactions(data: FinanceData, accountId: string): boolean {
+  return data.transactions.some(t => t.accountId === accountId || (t.type === 'transfer' && t.toAccountId === accountId));
+}
+export function deleteAccount(data: FinanceData, accountId: string): void {
+  if (!data.accounts.some(a => a.id === accountId)) throw new Error('Account not found');
+  if (accountHasTransactions(data, accountId)) throw new Error('This account has transactions. Archive it to preserve your history.');
+  if (data.schedules?.some(s => s.accountId === accountId)) throw new Error('This account has schedules. Delete or move them before deleting the account.');
+  data.accounts = data.accounts.filter(a => a.id !== accountId);
+}
+export function setAccountArchived(data: FinanceData, accountId: string, archived: boolean): void {
+  const account = data.accounts.find(a => a.id === accountId);
+  if (!account) throw new Error('Account not found');
+  account.archived = archived;
+}
+export function assertActiveTransactionAccounts(data: FinanceData, transaction: Transaction): void {
+  const previous = data.transactions.find(t => t.id === transaction.id);
+  if (data.accounts.find(a => a.id === transaction.accountId)?.archived && previous?.accountId !== transaction.accountId) throw new Error('Restore this archived account before adding transactions.');
+  if (transaction.type === 'transfer' && data.accounts.find(a => a.id === transaction.toAccountId)?.archived && (previous?.type !== 'transfer' || previous.toAccountId !== transaction.toAccountId)) throw new Error('Restore the archived destination account before adding transfers.');
+}
+
+export function parseMoney(input: string, allowNegative = false, currency: Currency = 'USD'): number {
   const value = input.trim();
   if (!(allowNegative ? /^-?\d+(\.\d{1,2})?$/ : /^\d+(\.\d{1,2})?$/).test(value)) throw new Error('Enter an amount with up to 2 decimal places');
+  if (currency === 'JPY' && value.includes('.')) throw new Error('Enter a whole yen amount');
   const negative = value.startsWith('-');
   const [whole, fraction = ''] = value.replace('-', '').split('.');
-  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+  const amount = Number(whole) * minorUnit(currency) + (currency === 'JPY' ? 0 : Number(fraction.padEnd(2, '0')));
   if (!Number.isSafeInteger(amount) || amount > 100_000_000_000) throw new Error('Amount is too large');
   return negative ? -amount : amount;
 }
-export function money(amount: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount / 100);
+export function money(amount: number, currency: Currency = 'USD'): string {
+  return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency }).format(amount / minorUnit(currency));
 }
 export function localDate(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -81,15 +188,21 @@ export function accountBalance(data: FinanceData, id: string): number {
     return balance;
   }, data.accounts.find(a => a.id === id)?.openingBalance ?? 0);
 }
-export function totals(data: FinanceData, month: string) {
+export function dataForCurrency(data: FinanceData, currency: Currency): FinanceData {
+  const accounts = data.accounts.filter(a => currencyOf(a) === currency);
+  const ids = new Set(accounts.map(a => a.id));
+  return { ...data, accounts, ...(data.goals ? { goals: data.goals.filter(g => currencyOf(g) === currency) } : {}), ...(data.schedules ? { schedules: data.schedules.filter(s => ids.has(s.accountId)) } : {}), transactions: data.transactions.filter(t => ids.has(t.accountId)), budgets: data.budgets.filter(b => currencyOf(b) === currency) };
+}
+export function totals(data: FinanceData, month: string, currency: Currency = 'USD') {
+  data = dataForCurrency(data, currency);
   const transactions = data.transactions.filter(t => t.date.startsWith(month));
   const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const expense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
   const balance = data.accounts.reduce((s, a) => s + accountBalance(data, a.id), 0);
   return { income, expense, balance, saved: income - expense };
 }
-export function categorySpending(data: FinanceData, month: string, categoryId: string) {
-  return data.transactions.filter(t => t.type === 'expense' && t.date.startsWith(month) && t.categoryId === categoryId).reduce((s, t) => s + t.amount, 0);
+export function categorySpending(data: FinanceData, month: string, categoryId: string, currency: Currency = 'USD') {
+  return dataForCurrency(data, currency).transactions.filter(t => t.type === 'expense' && t.date.startsWith(month) && t.categoryId === categoryId).reduce((s, t) => s + t.amount, 0);
 }
 export const defaultCategories: Category[] = [
   { id: 'food', name: 'Food & dining', color: '#c98748', icon: 'food' },

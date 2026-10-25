@@ -1,9 +1,11 @@
 import { ArrowDownLeft, ArrowUpRight } from 'lucide-react';
-import { categorySpending, money, totals, type FinanceData } from '@/lib/finance';
+import { categorySpending, money as formatMoney, minorUnit, dataForCurrency, totals, type Currency, type FinanceData } from '@/lib/finance';
 import { EmptyState } from './ui';
 
-export function CashflowChart({ data, month }: { data: FinanceData; month: string }) {
-  const summary = totals(data, month);
+export function CashflowChart({ data, month, currency = 'USD' }: { data: FinanceData; month: string; currency?: Currency }) {
+  data = dataForCurrency(data, currency);
+  const money = (amount: number) => formatMoney(amount, currency);
+  const summary = totals(data, month, currency);
   const weeks = [0, 1, 2, 3, 4].map(index => {
     const entries = data.transactions.filter(t => t.date.startsWith(month) && Math.floor((Number(t.date.slice(-2)) - 1) / 7) === index);
     return { label: `${index * 7 + 1}–${Math.min(index * 7 + 7, new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate())}`, income: entries.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0), expense: entries.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0) };
@@ -12,13 +14,15 @@ export function CashflowChart({ data, month }: { data: FinanceData; month: strin
   return <section className="card cashflow"><div className="card-heading"><div><h2>Money in, money out</h2><p>A little perspective on your month</p></div><span className="subtle-badge">This period</span></div>
     <div className="chart-summary"><span><i className="legend-dot income-dot"/>Income <strong>{money(summary.income)}</strong></span><span><i className="legend-dot expense-dot"/>Expenses <strong>{money(summary.expense)}</strong></span></div>
     <div className="bar-chart" role="img" aria-label={`Weekly income and expenses for ${month}. ${weeks.map(w => `Days ${w.label}: income ${money(w.income)}, expenses ${money(w.expense)}`).join('. ')}`}>
-      <div className="chart-axis">{[1, .75, .5, .25, 0].map(n => <span key={n}>{new Intl.NumberFormat('en-US', { notation: 'compact', style: 'currency', currency: 'USD', maximumFractionDigits: 1 }).format(max * n / 100)}</span>)}</div>
+      <div className="chart-axis">{[1, .75, .5, .25, 0].map(n => <span key={n}>{new Intl.NumberFormat('en-US', { notation: 'compact', style: 'currency', currency, maximumFractionDigits: 1 }).format(max * n / minorUnit(currency))}</span>)}</div>
       <div className="plot"><div className="grid-lines">{[0, 1, 2, 3, 4].map(i => <span key={i}/>)}</div><div className="bar-groups">{weeks.map(w => <div className="bar-group" key={w.label}><div className="bars"><div className="bar income-bar" style={{ height: `${w.income / max * 100}%` }} title={`Income: ${money(w.income)}`}/><div className="bar expense-bar" style={{ height: `${w.expense / max * 100}%` }} title={`Expenses: ${money(w.expense)}`}/></div><span>{w.label}</span></div>)}</div></div>
     </div><div className="chart-footnote"><span><ArrowDownLeft size={14}/> Income</span><span><ArrowUpRight size={14}/> Expenses</span><span>Day of month</span></div>
   </section>;
 }
-export function SpendingChart({ data, month }: { data: FinanceData; month: string }) {
-  const spending = data.categories.map(c => ({ ...c, amount: categorySpending(data, month, c.id) })).filter(c => c.amount > 0).sort((a, b) => b.amount - a.amount);
+export function SpendingChart({ data, month, currency = 'USD' }: { data: FinanceData; month: string; currency?: Currency }) {
+  data = dataForCurrency(data, currency);
+  const money = (amount: number) => formatMoney(amount, currency);
+  const spending = data.categories.map(c => ({ ...c, amount: categorySpending(data, month, c.id, currency) })).filter(c => c.amount > 0).sort((a, b) => b.amount - a.amount);
   const total = spending.reduce((s, c) => s + c.amount, 0);
   let offset = 0;
   const stops = spending.map(c => { const start = offset; offset += c.amount / total * 100; return `${c.color} ${start}% ${offset}%`; });

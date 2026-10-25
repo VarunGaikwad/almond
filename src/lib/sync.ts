@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { financeSchema } from './finance';
+import { SYNC_PROTOCOL_HEADER, SYNC_PROTOCOL_VERSION, syncProtocolHeaders } from './data-format';
 import { acknowledge, db, preparePending, receiveRemote } from './store';
 
 const remoteSchema = z.object({ version: z.number().int().nonnegative(), data: financeSchema, mutationId: z.string().nullable() });
@@ -8,6 +9,9 @@ async function responseData(response: Response) {
   if (response.status === 401 || response.status === 403) {
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('almond-auth-required'));
     throw new Error('Sign in again to sync. Your offline changes are safe.');
+  }
+  if (response.status === 426 || ((response.ok || response.status === 409) && response.headers.get(SYNC_PROTOCOL_HEADER) !== String(SYNC_PROTOCOL_VERSION))) {
+    throw new Error('Sync requires a compatible Almond upgrade. Your offline changes are safe.');
   }
   if (response.status === 503) throw new Error('Cloud sync is not configured on this server.');
   if (!response.ok && response.status !== 409) {
@@ -18,21 +22,29 @@ async function responseData(response: Response) {
   return remoteSchema.parse(await response.json());
 }
 async function performSync(scope: string) {
-  // Flush pending snapshots first: a lost acknowledgement must not look like a conflict.
+  // Keep the durable retry identity even if the compatibility handshake fails.
+  await preparePending(scope);
+  const download = () => fetch(`/api/sync?userId=${encodeURIComponent(scope.slice(5))}`, { cache: 'no-store', headers: syncProtocolHeaders });
+  const handshake = await download();
+  const snapshot = await responseData(handshake);
+  if (!handshake.ok) throw new Error('Could not establish sync compatibility. Your offline changes are safe.');
+  // Do not receive the handshake over pending edits: a lost acknowledgement must retry first.
+  let uploaded = false;
   for (let i = 0; i < 5; i++) {
     const pending = await preparePending(scope);
     if (!pending) break;
     const response = await fetch('/api/sync', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...syncProtocolHeaders },
       body: JSON.stringify({ ...pending, userId: scope.slice(5) }),
     });
     const remote = await responseData(response);
     if (response.status === 409) { await receiveRemote(scope, remote); return; }
     await acknowledge(scope, pending, remote);
+    uploaded = true;
   }
   if ((await db.workspaces.get(scope))?.conflict) return;
-  const response = await fetch(`/api/sync?userId=${encodeURIComponent(scope.slice(5))}`, { cache: 'no-store' });
-  await receiveRemote(scope, await responseData(response));
+  if (!uploaded) { await receiveRemote(scope, snapshot); return; }
+  await receiveRemote(scope, await responseData(await download()));
 }
 export function syncWorkspace(scope: string): Promise<void> {
   if (!scope.startsWith('user:')) return Promise.resolve();

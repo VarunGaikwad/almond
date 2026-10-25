@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { acknowledge, changeData, db, ensureWorkspace, preparePending, receiveRemote, resolveConflict } from '@/lib/store';
-import { emptyData, sampleData } from '@/lib/finance';
+import { deleteAccount, emptyData, financeSchema, sampleData, setAccountArchived } from '@/lib/finance';
 
 const scope = 'user:test-user';
 beforeEach(async () => { await db.workspaces.clear(); await ensureWorkspace(scope); });
@@ -17,6 +17,41 @@ describe('durable offline state', () => {
     await expect(changeData(scope, data => { data.categories.push(data.categories[0]); })).rejects.toThrow();
     expect((await db.workspaces.get(scope))?.sequence).toBe(0);
     expect((await db.workspaces.get(scope))?.data).toEqual(emptyData());
+  });
+  it('persists account currencies through reopening, sync snapshots and JSON restore', async () => {
+    const data = sampleData();
+    data.accounts.push({ id: 'yen', name: 'Yen', type: 'cash', color: '#123456', currency: 'JPY', openingBalance: 1200 });
+    await changeData(scope, d => Object.assign(d, data));
+    await ensureWorkspace(scope);
+    const pending = (await preparePending(scope))!;
+    expect(pending.data.accounts.at(-1)?.currency).toBe('JPY');
+    await acknowledge(scope, pending, { version: 1, data: pending.data, mutationId: pending.id });
+    await receiveRemote(scope, { version: 2, data: JSON.parse(JSON.stringify(data)), mutationId: 'remote' });
+    expect((await db.workspaces.get(scope))?.data).toEqual(data);
+  });
+  it('rejects currency changes atomically without relabeling existing money', async () => {
+    await changeData(scope, d => Object.assign(d, sampleData()));
+    const before = await db.workspaces.get(scope);
+    await expect(changeData(scope, d => { d.accounts.find(a => a.id === 'cash')!.currency = 'JPY'; })).rejects.toThrow('currency cannot be changed');
+    expect(await db.workspaces.get(scope)).toEqual(before);
+  });
+  it('persists deletion and archive/restore through snapshots and reopening', async () => {
+    await changeData(scope, d => Object.assign(d, sampleData()));
+    await changeData(scope, d => { deleteAccount(d, 'cash'); setAccountArchived(d, 'savings', true); });
+    await ensureWorkspace(scope);
+    const pending = (await preparePending(scope))!;
+    expect(pending.data.accounts.some(a => a.id === 'cash')).toBe(false);
+    expect(pending.data.accounts.find(a => a.id === 'savings')?.archived).toBe(true);
+    expect(financeSchema.parse(JSON.parse(JSON.stringify(pending.data)))).toEqual(pending.data);
+    await acknowledge(scope, pending, { version: 1, data: pending.data, mutationId: pending.id });
+    await changeData(scope, d => setAccountArchived(d, 'savings', false));
+    expect((await db.workspaces.get(scope))?.data.accounts.find(a => a.id === 'savings')?.archived).toBe(false);
+  });
+  it('rolls back deletion of an account referenced as a transfer destination', async () => {
+    await changeData(scope, d => Object.assign(d, sampleData()));
+    const before = await db.workspaces.get(scope);
+    await expect(changeData(scope, d => deleteAccount(d, 'savings'))).rejects.toThrow('Archive');
+    expect(await db.workspaces.get(scope)).toEqual(before);
   });
   it('serializes concurrent edits', async () => {
     await Promise.all([changeData(scope, d => { d.categories[0].name = 'A'; }), changeData(scope, d => { d.categories[1].name = 'B'; })]);

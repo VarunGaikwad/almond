@@ -28,12 +28,12 @@ test('validates confirmation, handles expired tokens, and resets without signing
   await page.getByLabel('Password', { exact: true }).fill('replacement-password');
   await page.getByLabel('Confirm password').fill('different-password');
   await page.getByRole('button', { name: 'Reset password', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Passwords do not match.');
+  await expect(page.getByRole('main').getByRole('alert')).toHaveText('Passwords do not match.');
   expect(requests).toBe(0);
   await page.getByLabel('Confirm password').fill('replacement-password');
   await page.getByRole('button', { name: 'Reset password', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('invalid or has expired');
-  await expect(page.getByRole('alert')).toBeFocused();
+  await expect(page.getByRole('main').getByRole('alert')).toContainText('invalid or has expired');
+  await expect(page.getByRole('main').getByRole('alert')).toBeFocused();
   invalid = false;
   await page.getByRole('button', { name: 'Reset password', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Your password has been reset');
@@ -43,7 +43,7 @@ test('validates confirmation, handles expired tokens, and resets without signing
 test('rejects missing or invalid link parameters and permits requesting another link', async ({ page }) => {
   for (const path of ['/reset-password', '/reset-password?error=INVALID_TOKEN', '/reset-password?token=test-token&error=INVALID_TOKEN']) {
     await page.goto(path);
-    await expect(page.getByRole('alert')).toContainText('invalid or has expired');
+    await expect(page.getByRole('main').getByRole('alert')).toContainText('invalid or has expired');
     await expect(page.getByRole('button', { name: 'Reset password', exact: true })).toHaveCount(0);
     await page.getByRole('link', { name: 'Request a new link', exact: true }).click();
     await expect(page).toHaveURL(/forgot-password$/);
@@ -58,8 +58,8 @@ test('recovery requests can be retried after a service error', async ({ page }) 
   await page.goto('/forgot-password');
   await page.getByLabel('Email address').fill('test@example.com');
   await page.getByRole('button', { name: 'Send reset link' }).click();
-  await expect(page.getByRole('alert')).toContainText('Email service unavailable');
-  await expect(page.getByRole('alert')).toBeFocused();
+  await expect(page.getByRole('main').getByRole('alert')).toContainText('Email service unavailable');
+  await expect(page.getByRole('main').getByRole('alert')).toBeFocused();
   failing = false;
   await page.getByRole('button', { name: 'Send reset link' }).click();
   await expect(page.getByRole('status')).toContainText('If an account exists');

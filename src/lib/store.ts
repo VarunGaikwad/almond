@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
-import { emptyData, financeSchema, sampleData, type FinanceData } from './finance';
+import { postScheduleOccurrence } from './schedules';
+import { currencyOf, emptyData, financeSchema, sampleData, type FinanceData } from './finance';
 
 export interface RemoteSnapshot { version: number; data: FinanceData; mutationId: string | null }
 export interface PendingSnapshot { id: string; baseVersion: number; data: FinanceData; sequence: number }
@@ -12,6 +13,15 @@ export class AlmondDB extends Dexie {
   constructor(name = 'almond-v1') {
     super(name);
     this.version(1).stores({ workspaces: 'id' });
+    this.version(2).stores({ workspaces: 'id' });
+    // Dexie can reopen newer versions: isolate old writers, not just their version.
+    this.version(3).stores({ workspaces: 'id', workspacesV2: 'id' }).upgrade(async tx => {
+      const records = await tx.table('workspaces').toArray();
+      await tx.table('workspacesV2').bulkPut(records);
+    });
+    // Copy and removal commit in one IndexedDB upgrade transaction.
+    this.version(4).stores({ workspaces: null, workspacesV2: 'id' });
+    this.workspaces = this.table('workspacesV2');
   }
 }
 export const db = new AlmondDB();
@@ -25,12 +35,22 @@ export async function changeData(id: string, change: (data: FinanceData) => void
     const workspace = await db.workspaces.get(id);
     if (!workspace) throw new Error('Workspace is not ready');
     if (workspace.conflict) throw new Error('Resolve the sync conflict before editing');
+    const accountCurrencies = new Map(workspace.data.accounts.map(a => [a.id, currencyOf(a)]));
     change(workspace.data);
     workspace.data = financeSchema.parse(workspace.data);
+    for (const account of workspace.data.accounts) {
+      if (accountCurrencies.has(account.id) && accountCurrencies.get(account.id) !== currencyOf(account)) throw new Error('An existing account’s currency cannot be changed. Create a new account instead.');
+    }
     workspace.sequence++;
     workspace.dirty = true;
     await db.workspaces.put(workspace);
   });
+}
+// Keep the occurrence captured by the initiating UI, including on retries.
+export async function recordPayment(id: string, scheduleId: string, expectedDue: string): Promise<boolean> {
+  let posted = false;
+  await changeData(id, data => { posted = postScheduleOccurrence(data, scheduleId, expectedDue); });
+  return posted;
 }
 export async function preparePending(id: string): Promise<PendingSnapshot | undefined> {
   return db.transaction('rw', db.workspaces, async () => {

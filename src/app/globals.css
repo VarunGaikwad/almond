@@ -3,6 +3,10 @@
 
 :root { --bg:#f7f7f2; --surface:#fff; --sidebar:#fbfbf7; --text:#30392e; --muted:#697161; --border:#e9ebe3; --primary:#536b46; --primary-hover:#506846; --primary-soft:#eaf0e3; --sage:#e1e9d7; --sage-text:#3f5135; --danger:#ad5149; --income:#587147; --expense:#c2a576; --shadow:0 8px 40px #28302106; --logo-line:#fbfbf7; color-scheme:light; }
 :root[data-theme=dark] { --bg:#1c211c; --surface:#252c25; --sidebar:#202620; --text:#e5eadd; --muted:#acb4a4; --border:#364034; --primary:#a6bb91; --primary-hover:#b6cba2; --primary-soft:#35412e; --sage:#35442e; --sage-text:#e0ebd4; --danger:#f3a39a; --income:#a3bd8f; --expense:#c8ac7e; --shadow:none; --logo-line:#252c25; color-scheme:dark; }
+:root[data-accent=blue] { --primary:#365f8c; --primary-hover:#2c527b; --primary-soft:#e7eef7; --sage:#dce7f4; --sage-text:#29496c; }
+:root[data-accent=plum] { --primary:#774b7d; --primary-hover:#683d6e; --primary-soft:#f2e9f3; --sage:#ecdfef; --sage-text:#603b66; }
+:root[data-theme=dark][data-accent=blue] { --primary:#a9c7ed; --primary-hover:#bdd6f5; --primary-soft:#2d3c50; --sage:#2c3e55; --sage-text:#deebfb; }
+:root[data-theme=dark][data-accent=plum] { --primary:#d3b2dc; --primary-hover:#e1c5e8; --primary-soft:#443249; --sage:#47364d; --sage-text:#f0dff5; }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--text); font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
 button,input,select,textarea { font:inherit; }
@@ -26,6 +30,11 @@ label { display:flex; flex-direction:column; gap:7px; font-weight:500; font-size
 label input,label select,label textarea { width:100%; font-weight:400; font-size:14px; }
 .skip-link { position:fixed; left:16px; top:-80px; padding:12px 18px; border-radius:8px; background:var(--primary); color:var(--bg); z-index:1000; }
 .skip-link:focus { top:10px; }
+.dashboard-preferences fieldset { border:0; padding:0; margin:0 0 20px; min-width:0; }
+.dashboard-preferences legend { font-weight:600; margin-bottom:10px; }
+.dashboard-preferences .preference-checkbox { display:flex; flex-direction:row; align-items:center; gap:12px; min-height:44px; cursor:pointer; }
+.preference-checkbox input { width:18px; height:18px; accent-color:var(--primary); flex-shrink:0; }
+.chart-grid.single-widget,.detail-grid.single-widget { grid-template-columns:minmax(0,1fr); }
 .app-shell { display:flex; min-height:100dvh; }
 .sidebar { width:232px; position:fixed; top:0; bottom:0; padding:35px 20px 18px; background:var(--sidebar); border-right:1px solid var(--border); display:flex; flex-direction:column; z-index:30; overflow-y:auto; }
 .brand { display:flex; align-items:center; gap:8px; font-family:'Manrope',sans-serif; font-size:31px; letter-spacing:-1.3px; font-weight:800; margin:0 10px 48px; }

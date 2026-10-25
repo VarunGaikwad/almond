@@ -1,101 +1,87 @@
-# Almond implementation and parity tracker
+# Almond implementation and release plan
 
-## Product decisions
+## Product decisions and reference
 
-Confirmed: React/TypeScript, responsive web/PWA, Almond branding, Cashew feature and visual parity as the long-term target, login/cloud synchronization, and offline editing. Neon was the user's database preference; this implementation targets Neon PostgreSQL.
+Confirmed: React/TypeScript, responsive web/PWA, original Almond branding, Cashew feature and visual parity as the long-term target, login/cloud synchronization and offline editing. Neon was the user's database preference.
 
-Implemented stack: Next.js App Router, React, TypeScript, plain CSS with design tokens, Dexie/IndexedDB, Better Auth, Drizzle, Neon, Zod, Vitest, and Playwright. Plain CSS was sufficient for the existing interface, so Tailwind was not added merely because it appeared in the proposed stack.
+Implemented stack: Next.js App Router, React, TypeScript, plain CSS design tokens, Dexie/IndexedDB, Better Auth, Drizzle, Neon, Zod, Vitest and Playwright. No Tailwind dependency was needed for the existing interface.
 
-Visual direction: warm ivory surfaces, muted sage accents, rounded Material-inspired controls, DM Sans body text, Manrope headings, and readable financial summaries. Original Almond leaf/nut branding. This is a Cashew-inspired direction, **not verified pixel parity**. Reference screenshots and detailed interaction capture remain necessary.
+The official [Cashew README Key Features](https://github.com/jameskokoska/Cashew#key-features) is the feature inventory, not a verified behavioral specification. DeepWiki returned HTTP 429 during initial research. Detailed interaction, import-format and visual comparison remain unverified. Cashew's [license](https://github.com/jameskokoska/Cashew/blob/main/LICENSE) is GPL-3.0; no Cashew source, logo or artwork was reused. Almond's warm surfaces, rounded controls, local DM Sans/Manrope fonts and original branding are an inspired direction, not pixel parity.
 
-## Reference audit
+See [PARITY_TRACKER.md](PARITY_TRACKER.md) for the concise status matrix, code paths and executable/manual acceptance proof. “Implemented” describes repository behavior, not production readiness or a test-run result.
 
-Verified source: https://github.com/jameskokoska/Cashew/blob/main/README.md (Key Features).
+## Delivered scope and deliberate limits
 
-The README documents flexible budgets and periods, budget category limits and history, savings/spending goals, upcoming/subscription/repeating/debt/credit transactions, custom categories/titles, transaction search/filtering and bulk edits, multiple currencies/accounts and conversion rates, biometric lock, Google login, Material You styling, custom accent colors, light/dark themes, customizable dashboard widgets, graphs, adaptive layouts, cross-device synchronization, Google Drive backup, notifications, CSV/Sheets import, and transaction app links.
-
-Source license verified at https://github.com/jameskokoska/Cashew/blob/main/LICENSE: GNU GPL v3. No Cashew code or assets were reused. The DeepWiki URL returned HTTP 429 during initial research. Detailed visual, behavior, and import-format audits remain outstanding.
-
-## Current delivery
-
-| Area | Implementation | Verification / limitation |
-|---|---|---|
-| App shell and navigation | Six screens, hash-addressable navigation, mobile drawer | Browser workflow and mobile overflow tests |
-| Branding and themes | Original Almond mark, light/dark, local fonts | Dashboard axe checks in both themes; original screenshots not compared |
-| Accounts | Create/edit, account types, opening/calculated balances | Browser test and domain calculations; archive/delete pending |
-| Transactions | Income/expense/transfer, create/edit/delete, notes/date | Browser CRUD and exact cents tests; recurring/bulk operations pending |
-| Filters | Month, title/notes search, account, category, type | Browser search proof; amount/tag filters pending |
-| Categories | Defaults plus create/edit color/name/icon | Browser test; expanded icon picker/archive pending |
-| Budgets | One monthly limit per category with progress | Browser creation and duplicate validation tests; custom periods/goals pending |
-| Reports | Weekly cashflow, category spending, net income/savings rate | Derived from real ledger; not complete Cashew reports |
-| Money | Bounded integer minor-unit arithmetic; atomic transfer entity | Unit tests; only USD, no exchange rates |
-| Local data | Atomic IndexedDB mutations, separated local/user workspaces | Persistence/concurrency tests and offline browser test |
-| Backup | Versioned JSON export and validated replacement restore | Browser round-trip; no Cashew/CSV/Sheets compatibility claim |
-| PWA | Manifest, icons, production service worker, static shell offline | Real production offline reload + edit + second reload passed |
-| Auth | Better Auth email/password, server sessions, database rate limit | Builds and unconfigured path tested; live Neon and recovery unverified |
-| Cloud sync | Durable versioned whole-workspace snapshots, CAS writes, retries | Client state/transport tests, API boundary tests; live two-device test pending |
-| Conflicts | Preserve both snapshots; explicit whole-copy choice with downloads | Unit tests; automatic merge intentionally not implemented |
-| Security | Session-derived ownership, same-origin writes, body/schema limits, no cached APIs | Mocked API-boundary tests; independent/live security review pending |
-| CI | Type check, unit tests, build, Chromium browser tests | Workflow checked in, remote CI not run |
+- Manual accounts, income/expense CRUD, atomic same-currency transfers, account archive/restore and protected deletion; exact USD/JPY/INR minor-unit amounts.
+- Optional one-time/daily/weekly/monthly/yearly schedules. Only explicit **Record payment** posts an occurrence; no automatic background posting, debt collection or lending ledger.
+- Monthly/inclusive date-range budgets, multiple categories and optional selected posted expenses. No category sublimits or comparison charts.
+- Saving goals use linked posted income; spending goals use linked posted expenses. They do not reserve or move money.
+- Canonical CSV preview, strict validation, duplicate exclusion and atomic confirmation. Sheets support means exporting CSV, not Google OAuth or native Sheets import. See [IMPORT_FORMAT.md](IMPORT_FORMAT.md).
+- Light/dark themes, sage/blue/plum accents and dashboard section visibility. No dashboard reordering or arbitrary/system-derived accents.
+- Integrated manual dated direct-rate reporting with BigInt rounding; browser checks cover rate CRUD, missing-rate suppression, offline persistence and unchanged ledger amounts. Reporting does not change ledger amounts, infer inverse/cross rates, fetch live rates or allow cross-currency transfers. See [CURRENCY_CONVERSION.md](CURRENCY_CONVERSION.md).
+- IndexedDB, validated JSON replacement restore, offline PWA shell, account-gated access and whole-workspace CAS sync with explicit conflict resolution.
+- Better Auth email/password and password reset with Resend integration. Recovery is implemented; real inbox delivery and full live lifecycle acceptance remain unverified. Email verification, OAuth and account/data deletion remain missing.
 
 ## Remaining milestones, in order
 
-### 1. Live cloud integration gate
+### 1. Local integration and proof — completed; rollout still gated
 
-- Configure staging Neon and production-grade authentication secrets/origin.
-- Apply checked-in migration and test sign-up, login, logout, revocation, and ownership isolation with two users.
-- Verify two-device sync, reconnect, lost acknowledgements, stale versions, deletion propagation, and conflicting offline edits against actual PostgreSQL.
-- Add a controlled live-integration test job using disposable staging users/database branches.
-- Add synchronization endpoint rate limits at the hosting boundary and test request/body limits.
+- Manual-rate reporting is mounted with validated atomic save/delete callbacks.
+- Export/restore and conflict downloads use shared backup v2 helpers; validated v1 input remains accepted. Protocol v2 mutual request/response checks reject incompatible peers before unsafe uploads.
+- The local upgrade copies all workspace records into `workspacesV2` and removes the old physical store in one transaction. A version bump alone was insufficient because Dexie reopens newer databases. Migration tests prove preservation, rollback/retry and legacy-writer isolation.
+- The service-worker shell cache is now `almond-shell-v3`. Production offline reload/edit and expanded backup round trips pass.
+- Final local proof: **204 unit/API tests, 26 mocked browser workflows, TypeScript and production build passed**. Browser coverage includes rates, CSV, schedules, goals, flexible budgets, accessibility and preservation of optional collections.
+- Still required before deployment: matching server/client rollout, refresh every device/PWA/old tab, and a real old-to-new waiting-worker/update-path check.
 
-**Exit:** prove cloud behavior with real sessions, not just mocks. No production financial records until this passes.
+**Exit:** integrated behavior has preservation and compatibility proof. Protocol v2 and backup v2 are distinct from the cloud workspace revision. Do not downgrade a prior release onto new-format data; older schemas may strip fields. Export before upgrading and retain compatible restore tooling.
 
-### 2. Authentication lifecycle and data safety
+### 2. Live cloud integration gate — execution deferred
 
-- Verified-email flow and secure password reset delivery.
-- Explicit account/data deletion with confirmation, retention and export policy.
-- Session-expiry and account-switch browser tests across tabs.
-- Quota warnings and persistent-storage request UX; backup reminders.
-- Replace snapshot sync with per-record operations only if measured limits or merge requirements justify it; include protocol migration and rollback compatibility.
+An opt-in real API harness exists in `tests/live/integration.spec.ts` with `playwright.live.config.ts`. It uses disposable staging users and a throwaway Neon branch, not mocks. **The user expressly deferred execution.** Do not provision or run it as part of this documentation refresh.
 
-**Exit:** users can recover access and leave safely; documented and tested recovery paths.
+When authorized, follow [LIVE_VERIFICATION.md](LIVE_VERIFICATION.md) for isolation attestation, migrations, all three opt-in gates, the staged command, no-secret logging and branch disposal. The automated suite checks real sessions, ownership, idempotent retry, stale revisions, snapshot deletion propagation and revocation; it does not prove browser/offline convergence or mail delivery.
 
-### 3. Financial parity
+- Separately verify real browser registration, login, logout, session expiry, account switching and ownership isolation using two users/profiles.
+- Verify two-device sync, reconnect, lost acknowledgements, stale clients and conflicting offline edits against actual PostgreSQL.
+- Follow the harness document's **Manual real-inbox password-reset acceptance** for delivery, single-use/expiry, password replacement, session revocation and retained workspace.
+- Configure hosting-boundary sync rate limits and verify request/body limits before public exposure.
 
-- Audit exact original behavior first, then implement recurring/subscription/upcoming transactions, debts/credit, and bulk operations.
-- Flexible budget periods, selected-transaction budgets, category limits, historical comparisons, and goals.
-- Multicurrency precision/conversion, exchange-rate freshness and offline fallbacks. No financial calculations using binary floating point.
-- Account/category archiving with preserved transaction references.
-- Import-preview/duplicate handling and CSV/Sheets compatibility from verified specifications.
+**Exit:** actual staging results recorded, not inferred from mocked tests or discovery/compile checks. No production financial records until this passes.
 
-**Exit:** each feature has a reference workflow and passing calculations, validation, persistence, and sync tests.
+### 3. Authentication lifecycle and data safety
 
-### 4. Visual and customization parity
+- Verified-email flow; complete real reset-delivery acceptance rather than reimplementing recovery.
+- Explicit account/data deletion, retention/export policy and administrative recovery policy.
+- Multi-tab access checks, quota warnings, persistent-storage UX and backup reminders.
+- Keep whole-workspace sync unless measured limits or merge requirements justify per-record operations; any transition needs protocol migration and rollback/preservation proof.
 
-- Capture original Cashew screens at agreed desktop/mobile sizes and identify web adaptations.
-- Match layouts, spacing, typography, components, and interaction states; retain original Almond identity.
-- Accent selection and customizable dashboard widgets.
-- Expand reports, localization, accessibility, and keyboard/mobile interaction checks.
-- Map biometric/app-lock, notifications, OAuth/Drive backup, and app links to feasible browser equivalents for user approval.
+**Exit:** users can recover access and leave safely, with tested recovery paths.
 
-**Exit:** approved visual comparisons and an explicit adaptation list, not assumptions about unavailable browser capabilities.
+### 4. Remaining financial and customization parity
+
+- Audit exact reference workflows before adding debt/credit repayment/collection, bulk edits, automatic title/category rules, tags and amount filters.
+- Budget category sublimits and historical comparison charts; expanded reports and category archiving with preserved references.
+- Assess any broader currency/rate workflow separately; no binary-floating-point financial calculations.
+- Capture Cashew desktop/mobile references and review layouts, spacing, typography and interaction states while retaining Almond identity.
+- Dashboard reordering, richer accents, localization and expanded accessibility/keyboard/mobile checks.
+- Obtain approval for browser adaptations of biometric/app lock, notifications, Google OAuth/Drive backup and transaction app links; none is currently implemented.
+
+**Exit:** each agreed parity item has a reference workflow, focused validation/persistence/sync coverage and approved visual comparison or explicit adaptation.
 
 ### 5. Release gate
 
-- Test supported browsers, installation/update paths, small-phone/landscape/tablet layouts, keyboard operation, and reduced motion.
-- Validate backup restoration and Neon point-in-time recovery in a separate branch.
-- Test staging migrations, old/new client compatibility, and rollback without dropping data.
-- Add privacy-preserving error monitoring, retention documentation, and deployment/runbook ownership.
+- Test supported browsers, installation/update paths, small-phone/landscape/tablet layouts, keyboard and reduced motion.
+- Validate JSON restoration and Neon recovery into a separate branch; never drop financial tables as rollback.
+- Test staging migrations, incompatible-client rejection and rollback compatibility with real saved data.
+- Add privacy-preserving error monitoring, retention documentation and deployment/runbook ownership.
 - Beta with noncritical records before general release.
 
-**Exit:** agreed parity items are complete or have approved exceptions; no known critical security/data-loss defects.
+**Exit:** approved parity exceptions, no known critical security/data-loss defects, and completed live/recovery gates. This working tree is not a production-readiness claim.
 
-## Explicit current limits
+## Safety constraints retained
 
-USD only, manual account tracking, monthly budgets, no real bank connections, no automated merges, no background sync while closed, no verified-email/password recovery, no end-to-end encryption/app lock, no original Cashew data-import compatibility, no external deployment. Whole-workspace sync is limited to 2 MB per request. Local data remains subject to browser storage eviction and is accessible to a person with access to the unlocked browser profile.
+Whole-workspace sync/JSON restore is limited to 2 MB; the ledger is bounded to 10,000 transactions, 100 accounts, 200 categories, 1,000 budgets and optional collections of at most 1,000 schedules/1,000 goals. Only USD/JPY/INR are supported. No bank connections, automatic merges or closed-app sync/posting. IndexedDB and exported JSON are unencrypted and subject to storage eviction. Anyone with access to the browser profile may open an eligible cached workspace offline; its marker is not a credential, biometric lock or encryption. Server authorization remains independent. Offline access cannot observe server revocation until reconnection. Keep regular backups and never log financial payloads, tokens or database credentials.
 
-## Build evidence
+## Verification evidence policy
 
-See README for executable verification commands. Initial local proof: 42 Vitest tests, 5 Playwright workflows, TypeScript and production build, migration generation consistency, and dependency audit. Screenshots were generated by Playwright but could not be visually inspected because image reading is disabled in this coding environment. DOM/layout/accessibility assertions were run instead. No claim of live Neon verification or full parity is made.
-
-Delegation was attempted as requested; both subagent calls failed because the runner could not load `@earendil-works/pi-coding-agent`. Implementation and verification proceeded in the parent session instead. No child wrote repository files.
+README lists local commands; the tracker maps coverage to features. The final integrated tree passed `npm test` (204 tests), `npm run typecheck`, `npm run build`, and `npm run test:e2e` (26 workflows with mocked auth/sync). Chromium needed isolated downloaded system libraries/font configuration under `/tmp`; no system package installation or application dependency change was made. Live cloud/inbox checks were not run, as requested. No deployment, remote CI, visual parity or full Cashew parity is claimed.

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Banknote, Car, Coffee, HeartPulse, House, MoreHorizontal, ShoppingBag, Sparkles, X, type LucideIcon } from 'lucide-react';
-import { money, type Category, type FinanceData, type Transaction } from '@/lib/finance';
+import { currencyOf, money, type Category, type FinanceData, type Transaction } from '@/lib/finance';
 
 export const categoryIcons: Record<Category['icon'], LucideIcon> = { food: Coffee, shopping: ShoppingBag, home: House, transport: Car, health: HeartPulse, fun: Sparkles, income: Banknote, other: MoreHorizontal };
 export function AlmondMark() { return <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M29 5C15 6 6 16 8 27c2 8 10 10 17 4C32 24 33 14 29 5Z" fill="currentColor"/><path d="M14 29 27 10" stroke="var(--logo-line, #f7f7f2)" strokeWidth="2" strokeLinecap="round"/></svg>; }
@@ -32,11 +32,11 @@ export function TransactionList({ data, transactions, onEdit, compact = false }:
     const category = data.categories.find(c => c.id === t.categoryId);
     const account = data.accounts.find(a => a.id === t.accountId);
     const date = new Date(`${t.date}T12:00:00`);
-    return <button className="transaction-row" key={t.id} onClick={() => onEdit(t)} aria-label={`Edit ${t.title}, ${money(t.amount)}`}>
+    return <button className="transaction-row" key={t.id} onClick={() => onEdit(t)} aria-label={`Edit ${t.title}, ${money(t.amount, currencyOf(account))}`}>
       <CategoryIcon category={category} transfer={t.type === 'transfer'}/>
       <span className="transaction-title"><strong>{t.title}</strong><span>{t.type === 'transfer' ? 'Transfer' : category?.name} <span className="dot">·</span> {account?.name}</span></span>
       <span className="transaction-date">{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-      <strong className={`transaction-amount ${t.type === 'income' ? 'positive' : ''}`}>{t.type === 'income' ? '+' : t.type === 'expense' ? '−' : ''}{money(t.amount)}</strong>
+      <strong className={`transaction-amount ${t.type === 'income' ? 'positive' : ''}`}>{t.type === 'income' ? '+' : t.type === 'expense' ? '−' : ''}{money(t.amount, currencyOf(account))}</strong>
     </button>;
   })}</div>;
 }

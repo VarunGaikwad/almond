@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import { sampleData, type FinanceData } from '../../src/lib/finance';
+import { SYNC_PROTOCOL_HEADER, SYNC_PROTOCOL_VERSION, syncProtocolHeaders } from '../../src/lib/data-format';
 
 // Browser transport fixtures only; these do not prove a live Better Auth/Neon deployment.
 export async function mockCloud(page: Page, signedIn = true, initialData: FinanceData = sampleData()) {
@@ -23,12 +24,15 @@ export async function mockCloud(page: Page, signedIn = true, initialData: Financ
     } else await route.abort();
   });
   await page.route('**/api/sync*', async route => {
-    if (!state.userId) { await route.fulfill({ status: 401, json: { error: 'Sign in to sync' } }); return; }
+    if (route.request().headers()[SYNC_PROTOCOL_HEADER.toLowerCase()] !== String(SYNC_PROTOCOL_VERSION)) {
+      await route.fulfill({ status: 426, headers: syncProtocolHeaders, json: { error: 'Upgrade Almond to sync safely' } }); return;
+    }
+    if (!state.userId) { await route.fulfill({ status: 401, headers: syncProtocolHeaders, json: { error: 'Sign in to sync' } }); return; }
     const payload = route.request().method() === 'POST' ? route.request().postDataJSON() : null;
     const userId = payload?.userId ?? new URL(route.request().url()).searchParams.get('userId');
-    if (userId !== state.userId) { await route.fulfill({ status: 403, json: { error: 'Workspace does not match session' } }); return; }
+    if (userId !== state.userId) { await route.fulfill({ status: 403, headers: syncProtocolHeaders, json: { error: 'Workspace does not match session' } }); return; }
     if (payload) { state.data = payload.data; state.version++; }
-    await route.fulfill({ json: { data: state.data, version: state.version, mutationId: payload?.id ?? null } });
+    await route.fulfill({ headers: syncProtocolHeaders, json: { data: state.data, version: state.version, mutationId: payload?.id ?? null } });
   });
   return state;
 }

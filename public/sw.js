@@ -1,5 +1,5 @@
 /* The shell contains no server-rendered user data. APIs and cross-origin traffic are never cached. */
-const CACHE = 'almond-shell-v2';
+const CACHE = 'almond-shell-v3';
 const PAGES = ['/', '/login', '/register'];
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
