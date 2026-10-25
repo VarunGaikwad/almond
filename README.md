@@ -76,6 +76,10 @@ AUTH_EMAIL_FROM=Almond <hello@your-verified-domain.example>
 
 Verify the sender domain in Resend, set these variables locally and on your host, and restart. No additional package or database migration is needed. Use **Forgot password?** on `/login` (or visit `/forgot-password`). Links expire after one hour and are single-use. The new password must be 12–128 characters. A successful reset revokes existing online sessions and requires signing in again; it cannot erase already-saved offline data on other devices. Reset requests are limited to three per minute per IP.
 
+A `200` response from `/api/auth/request-password-reset` does not confirm email delivery. Better Auth keeps the public response generic to avoid revealing whether an account exists and logs delivery failures separately. Server delivery errors include the Resend HTTP status and recognized error name, never the raw provider message. Check Resend's dashboard for details, confirm the API key has permission to send, verify the sender domain, and check any testing-mode recipient restrictions. Restart after changing environment variables. Never share API keys or reset links in logs or support requests.
+
+A sign-in `403` needs separate diagnosis: inspect the response error code and confirm `BETTER_AUTH_URL` matches the exact browser origin (scheme, hostname, and port). Do not disable origin/CSRF checks to work around it.
+
 Delivery is tested with a mocked Resend endpoint; verify a real inbox round trip after configuration before relying on recovery.
 
 ### Authentication limitations

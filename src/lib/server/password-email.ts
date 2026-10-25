@@ -11,5 +11,14 @@ export async function sendPasswordResetEmail({ user, url }: { user: { email: str
     }),
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) throw new Error('Password recovery email could not be sent');
+  if (!response.ok) {
+    // Provider messages can contain recipient addresses or other sensitive data.
+    const detail: unknown = await response.json().catch(() => null);
+    const name = detail && typeof detail === 'object' && 'name' in detail ? detail.name : undefined;
+    const safeNames = ['validation_error', 'missing_api_key', 'invalid_api_key', 'restricted_api_key',
+      'unverified_domain', 'rate_limit_exceeded', 'daily_quota_exceeded', 'monthly_quota_exceeded',
+      'application_error', 'internal_server_error'];
+    const code = typeof name === 'string' && safeNames.includes(name) ? `, ${name}` : '';
+    throw new Error(`Password recovery email could not be sent (Resend HTTP ${response.status}${code})`);
+  }
 }

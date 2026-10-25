@@ -61,6 +61,23 @@ it('delivers a one-use reset, enforces length, revokes sessions and hides unknow
   expect(response.status).toBe(403);
 });
 
+it.each([
+  [403, JSON.stringify({ name: 'validation_error', message: 'private@example.com https://example.com/reset?token=secret' }), ', validation_error'],
+  [401, JSON.stringify({ name: 'invalid_api_key', message: 'Bearer private-key' }), ', invalid_api_key'],
+  [429, JSON.stringify({ name: 'rate_limit_exceeded' }), ', rate_limit_exceeded'],
+  [500, JSON.stringify({ name: 'private@example.com', message: 'private-key' }), ''],
+  [502, '<html>private-key</html>', ''],
+  [500, 'null', ''],
+])('reports safe delivery diagnostics for HTTP %s', async (status, body, code) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status })));
+  const { sendPasswordResetEmail } = await import('@/lib/server/password-email');
+  const error = await sendPasswordResetEmail({
+    user: { email: 'private@example.com' }, url: 'https://example.com/reset?token=secret',
+  }).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toBe(`Password recovery email could not be sent (Resend HTTP ${status}${code})`);
+});
+
 it('fails safely when delivery is unavailable or unconfigured', async () => {
   const delivery = vi.fn().mockResolvedValue(new Response('provider details', { status: 500 }));
   vi.stubGlobal('fetch', delivery);
