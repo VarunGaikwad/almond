@@ -2,6 +2,29 @@ import { test, expect } from '@playwright/test';
 import { mockCloud } from './auth-fixture';
 import { sampleData } from '../../src/lib/finance';
 
+test('Goals currency picker aligns with its action on desktop and mobile', async ({ page }) => {
+  await mockCloud(page);
+  await page.goto('/#goals');
+  const currency = page.getByLabel('View currency', { exact: true });
+  const create = page.getByRole('button', { name: 'Create goal', exact: true });
+  await currency.selectOption('JPY');
+  for (const width of [1440, 900, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    const pickerBox = await page.locator('.currency-picker').boundingBox();
+    const selectBox = await currency.boundingBox();
+    const buttonBox = await create.boundingBox();
+    expect(pickerBox).not.toBeNull();
+    expect(selectBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
+    expect(Math.abs(pickerBox!.height - selectBox!.height)).toBeLessThan(1);
+    expect(Math.abs(selectBox!.height - buttonBox!.height)).toBeLessThan(1);
+    if (width >= 390) expect(Math.abs(selectBox!.y - buttonBox!.y)).toBeLessThan(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await create.click();
+  await expect(page.getByRole('dialog', { name: 'Create goal', exact: true }).getByLabel('Target (JPY)', { exact: true })).toBeVisible();
+});
+
 test('create a historical multi-category selected budget and linked goals, edit and reload progress', async ({ page }) => {
   const data = sampleData(); data.budgets = []; data.transactions = [
     { id: 'food-posted', title: 'Historical groceries', amount: 1000, accountId: 'checking', categoryId: 'food', type: 'expense', date: '2023-01-31' },

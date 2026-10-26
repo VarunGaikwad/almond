@@ -3,10 +3,10 @@ import { BACKUP_VERSION, createBackup, parseBackup, SYNC_PROTOCOL_VERSION } from
 import { emptyData, financeSchema, sampleData } from '@/lib/finance';
 
 describe('backup compatibility', () => {
-  it('uses version 2 for backups and sync', () => {
-    expect(BACKUP_VERSION).toBe(2); expect(SYNC_PROTOCOL_VERSION).toBe(2);
+  it('uses version 3 for backups and sync', () => {
+    expect(BACKUP_VERSION).toBe(3); expect(SYNC_PROTOCOL_VERSION).toBe(3);
     const data = sampleData();
-    expect(createBackup(data).version).toBe(2);
+    expect(createBackup(data).version).toBe(3);
     expect(parseBackup(JSON.stringify(createBackup(data)))).toEqual(data);
   });
   it('accepts legacy v1 exports and conflict downloads without a timestamp', () => {
@@ -24,7 +24,7 @@ describe('backup compatibility', () => {
   });
   it.each([
     null, {}, { format: 'almond', version: 2 },
-    { format: 'almond', version: 3, data: emptyData() },
+    { format: 'almond', version: 4, data: emptyData() },
     { format: 'almond', version: 0, data: emptyData() },
     { format: 'other', version: 2, data: emptyData() },
     { format: 'almond', version: 2, data: {} },

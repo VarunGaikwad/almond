@@ -8,7 +8,7 @@ beforeEach(() => { vi.resetAllMocks(); mocks.configured.mockReturnValue(true); m
 afterEach(() => vi.unstubAllEnvs());
 function request(body: unknown, origin = 'https://almond.example') { return new Request('https://almond.example/api/sync', { method: 'POST', headers: { origin, 'content-type': 'application/json', ...syncProtocolHeaders }, body: JSON.stringify(body) }); }
 describe('sync API trust boundaries', () => {
-  it.each([undefined, '1', '3'])('blocks old/mismatched clients (%s) without reading or writing workspace', async protocol => {
+  it.each([undefined, '1', '2', '4'])('blocks old/mismatched clients (%s) without reading or writing workspace', async protocol => {
     const headers = protocol ? { [SYNC_PROTOCOL_HEADER]: protocol } : undefined;
     const get = await GET(new Request('https://almond.example/api/sync?userId=owner', { headers }));
     const postRequest = request({ userId: 'owner', id: crypto.randomUUID(), baseVersion: 0, sequence: 1, data: emptyData() });
@@ -17,7 +17,7 @@ describe('sync API trust boundaries', () => {
     const post = await POST(postRequest);
     expect(postRequest.bodyUsed).toBe(false);
     for (const response of [get, post]) {
-      expect(response.status).toBe(426); expect(response.headers.get(SYNC_PROTOCOL_HEADER)).toBe('2');
+      expect(response.status).toBe(426); expect(response.headers.get(SYNC_PROTOCOL_HEADER)).toBe('3');
     }
     expect(mocks.database).not.toHaveBeenCalled();
   });
@@ -28,11 +28,11 @@ describe('sync API trust boundaries', () => {
       select: () => ({ from: () => ({ where: async () => [row] }) }),
     });
     const response = await GET(new Request('https://almond.example/api/sync?userId=owner', { headers: syncProtocolHeaders }));
-    expect(response.status).toBe(200); expect(response.headers.get(SYNC_PROTOCOL_HEADER)).toBe('2');
+    expect(response.status).toBe(200); expect(response.headers.get(SYNC_PROTOCOL_HEADER)).toBe('3');
     expect(await response.json()).toEqual(row);
     mocks.database.mockClear();
     const rejected = await POST(request({ userId: 'owner', id: crypto.randomUUID(), baseVersion: 0, sequence: 1, data: { ...emptyData(), futureFeature: [] } }));
-    expect(rejected.status).toBe(400); expect(rejected.headers.get(SYNC_PROTOCOL_HEADER)).toBe('2');
+    expect(rejected.status).toBe(400); expect(rejected.headers.get(SYNC_PROTOCOL_HEADER)).toBe('3');
     expect(mocks.database).not.toHaveBeenCalled();
   });
   it.each(['duplicate', 'updated', 'conflict'] as const)('annotates %s POST snapshots', async outcome => {
@@ -46,7 +46,7 @@ describe('sync API trust boundaries', () => {
     });
     const result = await POST(request({ userId: 'owner', id, baseVersion: 0, sequence: 1, data: emptyData() }));
     expect(result.status).toBe(outcome === 'conflict' ? 409 : 200);
-    expect(result.headers.get(SYNC_PROTOCOL_HEADER)).toBe('2');
+    expect(result.headers.get(SYNC_PROTOCOL_HEADER)).toBe('3');
     expect(await result.json()).toEqual(outcome === 'updated' ? updated : row);
     if (outcome === 'duplicate') expect(update).not.toHaveBeenCalled();
   });

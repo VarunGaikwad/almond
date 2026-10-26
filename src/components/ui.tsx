@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Banknote, Car, Coffee, HeartPulse, House, MoreHorizontal, ShoppingBag, Sparkles, X, type LucideIcon } from 'lucide-react';
-import { currencyOf, money, type Category, type FinanceData, type Transaction } from '@/lib/finance';
+import { currencyOf, money, reportingCurrency, type Category, type FinanceData, type Transaction } from '@/lib/finance';
+import { transactionReportingAmount } from '@/lib/exchange';
 
 export const categoryIcons: Record<Category['icon'], LucideIcon> = { food: Coffee, shopping: ShoppingBag, home: House, transport: Car, health: HeartPulse, fun: Sparkles, income: Banknote, other: MoreHorizontal };
 export function AlmondMark() { return <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M29 5C15 6 6 16 8 27c2 8 10 10 17 4C32 24 33 14 29 5Z" fill="currentColor"/><path d="M14 29 27 10" stroke="var(--logo-line, #f7f7f2)" strokeWidth="2" strokeLinecap="round"/></svg>; }
@@ -20,7 +21,7 @@ export function Modal({ title, children, onClose, wide = false }: { title: strin
   }, []);
   return <dialog ref={ref} className={`modal ${wide ? 'wide' : ''}`} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby="modal-title">
     <header className="modal-heading"><h2 id="modal-title">{title}</h2><button className="icon-button" aria-label="Close dialog" onClick={onClose}><X size={20}/></button></header>
-    {children}
+    <div className="modal-body">{children}</div>
   </dialog>;
 }
 export function EmptyState({ title, detail, action }: { title: string; detail: string; action?: ReactNode }) {
@@ -28,15 +29,25 @@ export function EmptyState({ title, detail, action }: { title: string; detail: s
 }
 export function TransactionList({ data, transactions, onEdit, compact = false }: { data: FinanceData; transactions: Transaction[]; onEdit: (t: Transaction) => void; compact?: boolean }) {
   if (!transactions.length) return <EmptyState title="A fresh start" detail="Your transactions will appear here. Add your first one to get started."/>;
+  const target = reportingCurrency(data);
   return <div className={`transaction-list ${compact ? 'compact' : ''}`}>{transactions.map(t => {
     const category = data.categories.find(c => c.id === t.categoryId);
     const account = data.accounts.find(a => a.id === t.accountId);
     const date = new Date(`${t.date}T12:00:00`);
-    return <button className="transaction-row" key={t.id} onClick={() => onEdit(t)} aria-label={`Edit ${t.title}, ${money(t.amount, currencyOf(account))}`}>
+    const source = currencyOf(account);
+    const converted = transactionReportingAmount(data, t, target);
+    const conversionNeeded = source !== target;
+    const sign = t.type === 'income' ? '+' : t.type === 'expense' ? '−' : '';
+    const conversionLabel = conversionNeeded ? converted === null ? ', conversion pending' : `, ${money(converted, target)} ${target}` : '';
+    return <button className="transaction-row" key={t.id} onClick={() => onEdit(t)} aria-label={`Edit ${t.title}, ${money(t.amount, source)}${conversionLabel}`}>
       <CategoryIcon category={category} transfer={t.type === 'transfer'}/>
       <span className="transaction-title"><strong>{t.title}</strong><span>{t.type === 'transfer' ? 'Transfer' : category?.name} <span className="dot">·</span> {account?.name}</span></span>
       <span className="transaction-date">{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-      <strong className={`transaction-amount ${t.type === 'income' ? 'positive' : ''}`}>{t.type === 'income' ? '+' : t.type === 'expense' ? '−' : ''}{money(t.amount, currencyOf(account))}</strong>
+      <span className={`transaction-amount ${t.type === 'income' ? 'positive' : ''}`}>
+        <strong>{converted === null ? `${sign}${money(t.amount, source)}` : `${sign}${money(converted, target)}`}</strong>
+        {conversionNeeded && <small>{converted === null ? 'Conversion pending' : `Originally ${money(t.amount, source)} ${source}`}</small>}
+        {conversionNeeded && converted !== null && t.fx && <small>Rate as of {t.fx.asOf}</small>}
+      </span>
     </button>;
   })}</div>;
 }

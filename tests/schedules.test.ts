@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { accountBalance, deleteAccount, emptyData, financeSchema, setAccountArchived, type Schedule } from '../src/lib/finance';
+import { accountBalance, deleteAccount, emptyData, financeSchema, setAccountArchived, setPrimaryAccount, type Schedule } from '../src/lib/finance';
 import { nextOccurrence, saveSchedule } from '../src/lib/schedules';
 import { changeData, db, ensureWorkspace, preparePending, receiveRemote, recordPayment } from '../src/lib/store';
 
@@ -39,6 +39,8 @@ describe('schedule dates and schema', () => {
   });
   it('protects accounts referenced by schedules and prevents assigning new schedules to archived accounts', () => {
     const d = data(); expect(() => deleteAccount(d, 'bank')).toThrow('schedules');
+    d.accounts.push({ ...d.accounts[0], id: 'replacement', name: 'Replacement' });
+    setPrimaryAccount(d, 'replacement');
     setAccountArchived(d, 'bank', true);
     expect(financeSchema.safeParse(d).success).toBe(true); // Archived history/plans remain readable.
     expect(() => saveSchedule(d, schedule({ id: 'new' }))).toThrow('archived');
@@ -63,7 +65,11 @@ describe('atomic schedule payments and persistence', () => {
     expect(accountBalance(w.data, 'bank')).toBe(37499);
   });
   it('does not post into archived accounts and rolls back failed changes', async () => {
-    await changeData(scope, d => setAccountArchived(d, 'bank', true));
+    await changeData(scope, d => {
+      d.accounts.push({ ...d.accounts[0], id: 'replacement', name: 'Replacement' });
+      setPrimaryAccount(d, 'replacement');
+      setAccountArchived(d, 'bank', true);
+    });
     await expect(recordPayment(scope, 'rent', '2023-01-31')).rejects.toThrow('archived');
     const w = (await db.workspaces.get(scope))!;
     expect(w.data.transactions).toHaveLength(0); expect(w.data.schedules?.[0].nextDue).toBe('2023-01-31');

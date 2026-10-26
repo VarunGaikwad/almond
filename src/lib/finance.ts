@@ -25,6 +25,16 @@ export const exchangeRateSchema = z.object({
   if (rate.source === rate.target) ctx.addIssue({ code: 'custom', message: 'Choose different source and target currencies' });
 });
 export type ExchangeRate = z.infer<typeof exchangeRateSchema>;
+export const fxQuoteSchema = z.object({
+  source: z.enum(currencies),
+  date: dateSchema.refine(value => value <= localDate(), 'Quote date must not be in the future'),
+  asOf: dateSchema,
+  rates: z.object({ USD: exchangeRateSchema.shape.rate, JPY: exchangeRateSchema.shape.rate, INR: exchangeRateSchema.shape.rate }).strict(),
+}).strict().superRefine((quote, ctx) => {
+  if (quote.asOf > quote.date) ctx.addIssue({ code: 'custom', message: 'Effective date must not follow the requested date' });
+  if (quote.rates[quote.source] !== '1') ctx.addIssue({ code: 'custom', message: 'Source currency rate must be exactly 1' });
+});
+export type FxQuote = z.infer<typeof fxQuoteSchema>;
 export const accountSchema = z.object({
   id, name: text, currency: currencySchema, archived: z.boolean().optional(), type: z.enum(['checking', 'savings', 'cash', 'credit']),
   openingBalance: z.number().int().min(-100_000_000_000).max(100_000_000_000),
@@ -36,6 +46,7 @@ export const transactionSchema = z.object({
   type: z.enum(['expense', 'income', 'transfer']), accountId: id,
   toAccountId: id.optional(), categoryId: id.optional(), date: dateSchema,
   notes: z.string().max(1000).optional(),
+  fx: fxQuoteSchema.optional(),
   scheduleId: id.optional(), scheduledFor: dateSchema.optional(),
 }).strict().superRefine((t, ctx) => {
   if (t.type === 'transfer' && (!t.toAccountId || t.toAccountId === t.accountId)) {
@@ -76,6 +87,7 @@ export const scheduleSchema = z.object({
 });
 export type Schedule = z.infer<typeof scheduleSchema>;
 export const financeSchema = z.object({
+  primaryAccountId: id.optional(),
   accounts: z.array(accountSchema).max(100),
   categories: z.array(categorySchema).max(200),
   transactions: z.array(transactionSchema).max(10000),
@@ -85,7 +97,7 @@ export const financeSchema = z.object({
   exchangeRates: z.array(exchangeRateSchema).max(6).optional(),
 }).strict().superRefine((data, ctx) => {
   for (const [key, rows] of Object.entries(data)) {
-    if (new Set((rows ?? []).map(row => row.id)).size !== (rows ?? []).length) ctx.addIssue({ code: 'custom', message: `Duplicate ${key} IDs` });
+    if (Array.isArray(rows) && new Set(rows.map(row => row.id)).size !== rows.length) ctx.addIssue({ code: 'custom', message: `Duplicate ${key} IDs` });
   }
   const pairs = new Set<string>();
   for (const rate of data.exchangeRates ?? []) {
@@ -95,7 +107,12 @@ export const financeSchema = z.object({
   }
   const accounts = new Set(data.accounts.map(a => a.id));
   const categories = new Set(data.categories.map(c => c.id));
+  if (data.primaryAccountId) {
+    const primary = data.accounts.find(a => a.id === data.primaryAccountId);
+    if (!primary || (primary.archived && data.accounts.some(a => !a.archived))) ctx.addIssue({ code: 'custom', message: 'Choose an existing active primary account', path: ['primaryAccountId'] });
+  }
   for (const t of data.transactions) {
+    if (t.fx && (t.fx.source !== currencyOf(data.accounts.find(a => a.id === t.accountId)) || t.fx.date !== t.date)) ctx.addIssue({ code: 'custom', message: 'FX snapshot must match the transaction account currency and date' });
     if (!accounts.has(t.accountId) || (t.type === 'transfer' && !accounts.has(t.toAccountId!))) ctx.addIssue({ code: 'custom', message: 'Transaction references an unknown account' });
     if (t.type === 'transfer' && currencyOf(data.accounts.find(a => a.id === t.accountId)) !== currencyOf(data.accounts.find(a => a.id === t.toAccountId))) ctx.addIssue({ code: 'custom', message: 'Transfers require accounts with the same currency' });
     if (t.type !== 'transfer' && !categories.has(t.categoryId!)) ctx.addIssue({ code: 'custom', message: 'Transaction references an unknown category' });
@@ -138,6 +155,24 @@ export type Transaction = z.infer<typeof transactionSchema>;
 export type Budget = z.infer<typeof budgetSchema>;
 export type FinanceData = z.infer<typeof financeSchema>;
 
+export function primaryAccount(data: FinanceData): Account | undefined {
+  return data.accounts.find(a => a.id === data.primaryAccountId && (!a.archived || !data.accounts.some(a => !a.archived)))
+    ?? data.accounts.find(a => !a.archived) ?? data.accounts[0];
+}
+export function reportingCurrency(data: FinanceData): Currency { return currencyOf(primaryAccount(data)); }
+export function setPrimaryAccount(data: FinanceData, id: string): void {
+  const account = data.accounts.find(a => a.id === id);
+  if (!account || (account.archived && data.accounts.some(a => !a.archived))) throw new Error('Choose an existing active primary account');
+  data.primaryAccountId = id;
+}
+export function normalizeFinanceData(data: FinanceData): FinanceData {
+  const validated = financeSchema.parse(data);
+  const primary = primaryAccount(validated);
+  if (primary) validated.primaryAccountId = primary.id;
+  else delete validated.primaryAccountId;
+  return validated;
+}
+
 export function deleteTransaction(data: FinanceData, id: string): void {
   data.transactions = data.transactions.filter(t => t.id !== id);
   for (const b of data.budgets) if (b.transactionIds) b.transactionIds = b.transactionIds.filter(link => link !== id);
@@ -151,11 +186,14 @@ export function deleteAccount(data: FinanceData, accountId: string): void {
   if (!data.accounts.some(a => a.id === accountId)) throw new Error('Account not found');
   if (accountHasTransactions(data, accountId)) throw new Error('This account has transactions. Archive it to preserve your history.');
   if (data.schedules?.some(s => s.accountId === accountId)) throw new Error('This account has schedules. Delete or move them before deleting the account.');
+  if (primaryAccount(data)?.id === accountId && data.accounts.length > 1) throw new Error('Select a replacement primary account before deleting this account.');
   data.accounts = data.accounts.filter(a => a.id !== accountId);
+  if (data.primaryAccountId === accountId) delete data.primaryAccountId;
 }
 export function setAccountArchived(data: FinanceData, accountId: string, archived: boolean): void {
   const account = data.accounts.find(a => a.id === accountId);
   if (!account) throw new Error('Account not found');
+  if (archived && !account.archived && primaryAccount(data)?.id === accountId) throw new Error('Select a replacement primary account before archiving this account.');
   account.archived = archived;
 }
 export function assertActiveTransactionAccounts(data: FinanceData, transaction: Transaction): void {
@@ -228,6 +266,7 @@ export function sampleData(): FinanceData {
     ['Yoga studio', 4500, 'health', 10], ['Dinner with friends', 7600, 'food', 17],
   ];
   return {
+    primaryAccountId: 'checking',
     accounts: [
       { id: 'checking', name: 'Everyday account', type: 'checking', openingBalance: 245000, color: '#6d8163' },
       { id: 'savings', name: 'Rainy day fund', type: 'savings', openingBalance: 620000, color: '#b39a70' },

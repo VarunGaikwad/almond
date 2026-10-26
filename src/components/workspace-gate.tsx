@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { checkWorkspaceAccess, OFFLINE_ACCOUNT_KEY, rememberAccount, type WorkspaceAccess } from '@/lib/workspace-access';
 import { ensureWorkspace } from '@/lib/store';
+import { prefersDarkTheme } from '@/lib/theme';
 import AlmondApp from './almond-app';
 import AuthPage from './auth-page';
 import { AlmondMark } from './ui';
@@ -11,7 +12,7 @@ export default function WorkspaceGate({ mode = 'workspace' }: { mode?: 'workspac
   const [access, setAccess] = useState<WorkspaceAccess | null>(null);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    try { document.documentElement.dataset.theme = localStorage.getItem('almond-theme') === 'dark' ? 'dark' : 'light'; } catch { /* Optional preference. */ }
+    document.documentElement.dataset.theme = prefersDarkTheme() ? 'dark' : 'light';
     if (process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator) void navigator.serviceWorker.register('/sw.js').catch(() => {});
     let active = true;
     let generation = 0;

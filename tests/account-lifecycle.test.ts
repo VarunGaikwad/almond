@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accountBalance, accountHasTransactions, assertActiveTransactionAccounts, currentMonth, deleteAccount, financeSchema, sampleData, setAccountArchived, totals, type Transaction } from '@/lib/finance';
+import { accountBalance, accountHasTransactions, assertActiveTransactionAccounts, currentMonth, deleteAccount, financeSchema, sampleData, setAccountArchived, setPrimaryAccount, totals, type Transaction } from '@/lib/finance';
 
 describe('account lifecycle', () => {
   it('deletes an account without transactions, removing its opening balance only', () => {
@@ -25,6 +25,7 @@ describe('account lifecycle', () => {
     const data = sampleData();
     const before = totals(data, currentMonth());
     const transactions = structuredClone(data.transactions);
+    setPrimaryAccount(data, 'savings');
     setAccountArchived(data, 'checking', true);
     expect(data.accounts[0].archived).toBe(true);
     const restoredBackup = financeSchema.parse(JSON.parse(JSON.stringify(data)));
@@ -37,6 +38,7 @@ describe('account lifecycle', () => {
   });
   it('rejects new transactions on archived accounts but permits history edits', () => {
     const data = sampleData();
+    setPrimaryAccount(data, 'savings');
     setAccountArchived(data, 'checking', true);
     const existing = data.transactions[0];
     expect(() => assertActiveTransactionAccounts(data, { ...existing, title: 'Edited' })).not.toThrow();
@@ -53,6 +55,20 @@ describe('account lifecycle', () => {
     expect(() => assertActiveTransactionAccounts(data, { ...data.transactions[0], accountId: 'savings' })).toThrow('Restore');
     const changedType: Transaction = { ...data.transactions[0], type: 'transfer', toAccountId: 'savings' };
     expect(() => assertActiveTransactionAccounts(data, changedType)).toThrow('destination');
+  });
+  it('requires a replacement primary before archive or deletion and preserves rejected data', () => {
+    const data = sampleData();
+    const before = structuredClone(data);
+    expect(() => setAccountArchived(data, 'checking', true)).toThrow('replacement primary');
+    expect(data).toEqual(before);
+    setPrimaryAccount(data, 'cash');
+    const primaryCash = structuredClone(data);
+    expect(() => deleteAccount(data, 'cash')).toThrow('replacement primary');
+    expect(data).toEqual(primaryCash);
+    setPrimaryAccount(data, 'savings');
+    deleteAccount(data, 'cash');
+    expect(data.primaryAccountId).toBe('savings');
+    expect(financeSchema.safeParse(data).success).toBe(true);
   });
   it('rejects unknown accounts and invalid archived values', () => {
     const data = sampleData();

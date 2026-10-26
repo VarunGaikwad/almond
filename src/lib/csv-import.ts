@@ -87,7 +87,12 @@ function rowTransaction(fields: string[], data: FinanceData): Transaction {
   return result.data;
 }
 export function parseCsvImport(source: string, data: FinanceData): CsvImportPreview {
-  const [header, ...body] = records(source);
+  return parseImportRecords(records(source), data);
+}
+
+/** Shared row validation for CSV and typed spreadsheet imports. */
+export function parseImportRecords(records: string[][], data: FinanceData, cellErrors?: Map<number, string[]>): CsvImportPreview {
+  const [header, ...body] = records;
   const expected = CSV_HEADER.split(',');
   if (!header || (header.length !== 6 && header.length !== 7) || header.some((field, index) => field !== expected[index])) {
     throw new Error(`Use the exact header ${CSV_HEADER} (notes column may be omitted).`);
@@ -95,7 +100,8 @@ export function parseCsvImport(source: string, data: FinanceData): CsvImportPrev
   if (!body.length) throw new Error('CSV contains no data rows.');
   const seen = new Set(data.transactions.map(csvTransactionKey));
   const rows = body.map((fields, index): CsvImportRow => {
-    const row: CsvImportRow = { row: index + 2, fields, errors: [], duplicate: false };
+    const row: CsvImportRow = { row: index + 2, fields, errors: cellErrors?.get(index + 2) ?? [], duplicate: false };
+    if (row.errors.length) return row;
     try {
       if (fields.length !== header.length) throw new Error(`Expected ${header.length} columns; found ${fields.length}.`);
       row.transaction = rowTransaction(fields, data);

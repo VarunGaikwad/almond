@@ -49,7 +49,7 @@ export function ScheduleList({ data, onEdit, onRecord }: { data: FinanceData; on
     try { await onRecord(schedule.id, due); } catch (e) { setError(errorText(e)); }
     finally { inFlight.current.delete(schedule.id); setBusy([...inFlight.current]); }
   }
-  return <section className="card"><p className="muted">Planned payments do not affect balances or budgets until you record them. Each action records just the displayed occurrence, on its due date.</p><ErrorMessage error={error}/>
+  return <section className="card schedule-list"><p className="muted">Planned payments do not affect balances or budgets until you record them. Each action records just the displayed occurrence, on its due date.</p><ErrorMessage error={error}/>
     {!schedules.length && <p>No schedules yet. Create a one-time or recurring payment.</p>}
     {(['Due', 'Upcoming', 'Completed'] as const).map(group => {
       const rows = schedules.filter(s => group === 'Completed' ? !s.nextDue : s.nextDue && (group === 'Due' ? s.nextDue <= today : s.nextDue > today));

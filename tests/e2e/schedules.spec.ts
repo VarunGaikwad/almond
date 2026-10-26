@@ -1,6 +1,31 @@
 import { test, expect } from '@playwright/test';
 import { mockCloud } from './auth-fixture';
 
+test('empty schedules have inset text and paragraph spacing on desktop and mobile', async ({ page }) => {
+  await mockCloud(page);
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Schedules', exact: true }).click();
+  const panel = page.locator('.schedule-list');
+  await expect(panel.getByText('No schedules yet. Create a one-time or recurring payment.', { exact: true })).toBeVisible();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const spacing = await panel.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      const [intro, empty] = Array.from(element.querySelectorAll(':scope > p')).map(p => p.getBoundingClientRect());
+      return {
+        top: intro.top - box.top,
+        left: Math.min(intro.left, empty.left) - box.left,
+        right: box.right - Math.max(intro.right, empty.right),
+        bottom: box.bottom - empty.bottom,
+        gap: empty.top - intro.bottom,
+        fits: document.documentElement.scrollWidth <= innerWidth,
+      };
+    });
+    for (const inset of [spacing.top, spacing.left, spacing.right, spacing.bottom, spacing.gap]) expect(inset).toBeGreaterThanOrEqual(16);
+    expect(spacing.fits).toBe(true);
+  }
+});
+
 test('plan, edit, explicitly record one occurrence, reload and delete without deleting ledger history', async ({ page }) => {
   await mockCloud(page);
   await page.goto('/');

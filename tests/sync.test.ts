@@ -14,7 +14,7 @@ describe('sync transport', () => {
     let applied = initial();
     const seen: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
-      expect(new Headers(init?.headers).get(SYNC_PROTOCOL_HEADER)).toBe('2');
+      expect(new Headers(init?.headers).get(SYNC_PROTOCOL_HEADER)).toBe('3');
       if (init?.method === 'POST') {
         const payload = JSON.parse(String(init.body)); seen.push(payload.id);
         if (seen.length === 1) { applied = { version: 1, data: payload.data, mutationId: payload.id }; throw new Error('Connection lost after commit'); }
@@ -28,7 +28,7 @@ describe('sync transport', () => {
     const w = await db.workspaces.get(scope);
     expect(w?.dirty).toBe(false); expect(w?.conflict).toBeUndefined(); expect(w?.data.categories[0].name).toBe('New');
   });
-  it.each([undefined, '1', '3'])('refuses an incompatible server (%s) before POST and keeps pending', async protocol => {
+  it.each([undefined, '1', '2'])('refuses an incompatible server (%s) before POST and keeps pending', async protocol => {
     await changeData(scope, d => { d.categories[0].name = 'Private'; });
     const fetch = vi.fn(async () => Response.json(initial(), { headers: protocol ? { [SYNC_PROTOCOL_HEADER]: protocol } : {} }));
     vi.stubGlobal('fetch', fetch);
@@ -40,7 +40,7 @@ describe('sync transport', () => {
   it.each([200, 409])('does not acknowledge or receive an incompatible POST response (%s)', async status => {
     await changeData(scope, d => { d.categories[0].name = 'Private'; });
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => init?.method === 'POST'
-      ? Response.json({ ...initial(), version: 3 }, { status, headers: { [SYNC_PROTOCOL_HEADER]: '3' } }) : response(initial())));
+      ? Response.json({ ...initial(), version: 3 }, { status, headers: { [SYNC_PROTOCOL_HEADER]: '2' } }) : response(initial())));
     await expect(syncWorkspace(scope)).rejects.toThrow('upgrade');
     const w = await db.workspaces.get(scope);
     expect(w?.pending).toBeDefined(); expect(w?.dirty).toBe(true); expect(w?.conflict).toBeUndefined(); expect(w?.baseVersion).toBe(0);

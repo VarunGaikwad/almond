@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { CSV_HEADER, CSV_MAX_BYTES, CSV_MAX_ROWS, csvTransactionKey, parseCsvImport, validateCsvImport } from '@/lib/csv-import';
 import { sampleData, type FinanceData, type Transaction } from '@/lib/finance';
 
@@ -16,6 +17,16 @@ const csv = (body = line) => `${CSV_HEADER}\n${body}`;
 const transaction = (data = fixture()) => parseCsvImport(csv(), data).rows[0].transaction!;
 
 describe('canonical CSV parsing', () => {
+  it('ships a template with the canonical header and valid income/expense examples', () => {
+    const source = readFileSync(new URL('../public/almond-import-template.csv', import.meta.url), 'utf8');
+    expect(source.split('\n')[0]).toBe(CSV_HEADER);
+    const rows = parseCsvImport(source, fixture()).rows;
+    expect(rows).toHaveLength(2);
+    expect(rows.map(row => row.errors)).toEqual([[], []]);
+    expect(rows.map(row => row.transaction?.type)).toEqual(['income', 'expense']);
+    expect(rows.every(row => !row.duplicate)).toBe(true);
+    expect(validateCsvImport(fixture(), rows.map(row => row.transaction!))).toHaveLength(2);
+  });
   it('parses BOM, CRLF, commas, escaped quotes and multiline fields', () => {
     const preview = parseCsvImport(`\uFEFF${CSV_HEADER}\r\n2026-02-28,"Coffee, ""large""",expense,12.34,Everyday account,Food & dining,"line one\r\nline two"\r\n`, fixture());
     expect(preview.rows).toHaveLength(1);

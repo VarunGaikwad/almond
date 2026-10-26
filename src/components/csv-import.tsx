@@ -26,10 +26,28 @@ export function CsvImport({ data, onClose, onImport }: {
     if (!file) return;
     lock.current = true; setBusy(true);
     try {
-      if (file.size > CSV_MAX_BYTES) throw new Error('CSV exceeds the 2 MiB limit.');
-      const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
-      setPreview(parseCsvImport(text, data));
+      if (file.size > CSV_MAX_BYTES) throw new Error('Spreadsheet exceeds the 2 MiB limit.');
+      const buffer = await file.arrayBuffer();
+      if (file.name.toLowerCase().endsWith('.xlsx')) {
+        const { parseXlsxImport } = await import('@/lib/xlsx-import');
+        setPreview(await parseXlsxImport(buffer, data));
+      } else if (file.name.toLowerCase().endsWith('.csv')) {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+        setPreview(parseCsvImport(text, data));
+      } else throw new Error('Choose an .xlsx or .csv file.');
     } catch (e) { setError(e instanceof TypeError ? 'CSV must be UTF-8 text.' : errorText(e)); }
+    finally { lock.current = false; setBusy(false); }
+  }
+  async function downloadTemplate() {
+    if (lock.current) return;
+    lock.current = true; setBusy(true); setError('');
+    try {
+      const { createXlsxTemplate } = await import('@/lib/xlsx-import');
+      const buffer = await createXlsxTemplate(data);
+      const url = URL.createObjectURL(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'almond-import-template.xlsx'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { setError(errorText(e)); }
     finally { lock.current = false; setBusy(false); }
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -40,16 +58,18 @@ export function CsvImport({ data, onClose, onImport }: {
     catch (e) { setError(errorText(e)); setConfirmed(false); }
     finally { lock.current = false; setBusy(false); }
   }
-  return <Modal title="Import CSV" wide onClose={() => { if (!lock.current) onClose(); }}>
+  return <Modal title="Import spreadsheet" wide onClose={() => { if (!lock.current) onClose(); }}>
     <form className="form-stack" onSubmit={submit} aria-busy={busy}>
-      <p className="muted">Export your Google Sheet as CSV, then choose the file here. This is a manual import, not a Google account connection. Use Almond’s canonical columns: date,title,type,amount,account,category,notes (notes optional).</p>
+      <p className="muted">Download the Excel template, fill in the Transactions sheet, then upload the .xlsx file here. The template includes date formatting, positive-number validation, and dropdowns for types, accounts, and categories. CSV files are still supported.</p>
       <p className="field-hint">Only income and expense rows. Use ISO dates, exact account/category names or IDs, and positive amounts in the account’s currency. USD/INR allow 2 decimal places; JPY requires whole yen. Maximum 2 MiB and 10,000 rows. Arbitrary Cashew exports are not supported.</p>
-      <label>CSV file<input type="file" accept=".csv,text/csv" required disabled={busy} onChange={e => void load(e.target.files?.[0])}/></label>
+      <button type="button" className="button secondary" disabled={busy} onClick={() => void downloadTemplate()}>Download XLSX template</button>
+      <p className="field-hint">Keep the header unchanged and replace or delete the examples. The Instructions sheet explains each column; Reference lists your account/category IDs and names. Enter amounts as numbers, not text or formulas. Spreadsheet rules can be bypassed by pasting, so Almond validates every row again before import. Notes are optional.</p>
+      <label>Spreadsheet file<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv" required disabled={busy} onChange={e => void load(e.target.files?.[0])}/></label>
       {preview && <>
         <p role="status">{preview.rows.length} rows: {preview.rows.filter(r => !r.errors.length && !r.duplicate).length} valid, {preview.rows.filter(r => r.errors.length).length} invalid, {preview.rows.filter(r => r.duplicate).length} duplicate. {selected.length} selected. Invalid and duplicate rows are excluded.</p>
         <p className="field-hint">Showing the first {Math.min(PREVIEW_ROWS, preview.rows.length)} rows. All valid nonduplicate rows are selected by default, including rows beyond this preview. Uncheck visible rows to exclude them. Split the file into smaller files to inspect every row.</p>
-        <div style={{ overflowX: 'auto', maxHeight: '22rem' }} tabIndex={0} role="region" aria-label="CSV preview">
-          <table><caption>CSV preview — logical record numbers include the header</caption><thead><tr><th scope="col">Import</th><th scope="col">Row</th><th scope="col">Title</th><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Amount</th><th scope="col">Account</th><th scope="col">Category</th><th scope="col">Notes</th><th scope="col">Status</th></tr></thead>
+        <div style={{ overflowX: 'auto', maxHeight: '22rem' }} tabIndex={0} role="region" aria-label="Import preview">
+          <table><caption>Import preview — row numbers include the header</caption><thead><tr><th scope="col">Import</th><th scope="col">Row</th><th scope="col">Title</th><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Amount</th><th scope="col">Account</th><th scope="col">Category</th><th scope="col">Notes</th><th scope="col">Status</th></tr></thead>
             <tbody>{preview.rows.slice(0, PREVIEW_ROWS).map(row => {
               const t = row.transaction;
               const eligible = !!t && !row.errors.length && !row.duplicate;

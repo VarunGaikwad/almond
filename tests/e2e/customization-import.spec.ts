@@ -50,16 +50,61 @@ test('dashboard visibility persists without hiding Reports; accent and reset per
   await expect(page.locator('.detail-grid > *')).toHaveCount(2);
 });
 
+test('popup scrollbars stay inset from rounded corners on desktop and mobile', async ({ page }) => {
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Import spreadsheet', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 480 });
+    const body = dialog.locator('.modal-body');
+    const bounds = await dialog.boundingBox();
+    const scrollBounds = await body.boundingBox();
+    expect(scrollBounds!.x).toBeGreaterThan(bounds!.x);
+    expect(scrollBounds!.x + scrollBounds!.width).toBeLessThan(bounds!.x + bounds!.width);
+    expect(scrollBounds!.y + scrollBounds!.height).toBeLessThan(bounds!.y + bounds!.height);
+    expect(await body.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    expect(await dialog.evaluate(el => getComputedStyle(el).overflow)).toBe('hidden');
+    const headingBefore = await dialog.locator('.modal-heading').boundingBox();
+    await body.evaluate(el => { el.scrollTop = el.scrollHeight; });
+    expect(await body.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+    expect(await dialog.locator('.modal-heading').boundingBox()).toEqual(headingBefore);
+    await expect(dialog.getByRole('button', { name: 'Close dialog' })).toBeInViewport();
+    await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeInViewport();
+  }
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+});
+
+test('XLSX template downloads and imports typed examples after confirmation', async ({ page }) => {
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Import spreadsheet', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  const pending = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download XLSX template', exact: true }).click();
+  const download = await pending;
+  expect(download.suggestedFilename()).toBe('almond-import-template.xlsx');
+  await dialog.getByLabel('Spreadsheet file').setInputFiles((await download.path())!);
+  await expect(dialog.getByRole('status')).toContainText('2 valid, 0 invalid, 0 duplicate. 2 selected.');
+  await expect(dialog.getByRole('button', { name: 'Import 2 transactions', exact: true })).toBeDisabled();
+  await dialog.getByRole('checkbox', { name: /I reviewed the preview/ }).check();
+  await dialog.getByRole('button', { name: 'Import 2 transactions', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.getByRole('link', { name: 'Transactions', exact: true }).click();
+  await page.getByLabel('Selected month').fill('2026-01');
+  await expect(page.getByRole('button', { name: /Edit Example income,/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Edit Example expense,/ })).toBeVisible();
+});
+
 test('CSV previews before confirmation, appends one record, and excludes repeat duplicates', async ({ page }) => {
   await page.getByRole('link', { name: 'Transactions', exact: true }).click();
   const initial = await page.locator('.transaction-row').count();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   const file = { name: 'almond.csv', mimeType: 'text/csv', buffer: Buffer.from(`date,title,type,amount,account,category,notes\n${localDate()},CSV browser coffee,expense,12.34,checking,food,Manual import`) };
-  await page.getByRole('button', { name: 'Import CSV', exact: true }).click();
+  await page.getByRole('button', { name: 'Import spreadsheet', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('CSV file').setInputFiles(file);
+  await dialog.getByLabel('Spreadsheet file').setInputFiles(file);
   await expect(dialog.getByRole('status')).toContainText('1 valid, 0 invalid, 0 duplicate. 1 selected.');
-  await expect(dialog.getByRole('region', { name: 'CSV preview', exact: true })).toContainText('CSV browser coffee');
+  await expect(dialog.getByRole('region', { name: 'Import preview', exact: true })).toContainText('CSV browser coffee');
   await expect(dialog.getByRole('button', { name: 'Import 1 transactions', exact: true })).toBeDisabled();
   await dialog.getByRole('checkbox', { name: /I reviewed the preview/ }).check();
   await dialog.getByRole('button', { name: 'Import 1 transactions', exact: true }).click();
@@ -70,8 +115,8 @@ test('CSV previews before confirmation, appends one record, and excludes repeat 
   await page.reload();
   await expect(page.locator('.transaction-row')).toHaveCount(initial + 1);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Import CSV', exact: true }).click();
-  await dialog.getByLabel('CSV file').setInputFiles(file);
+  await page.getByRole('button', { name: 'Import spreadsheet', exact: true }).click();
+  await dialog.getByLabel('Spreadsheet file').setInputFiles(file);
   await expect(dialog.getByRole('status')).toContainText('0 valid, 0 invalid, 1 duplicate. 0 selected.');
   await expect(dialog.getByText('Duplicate — excluded', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Import 0 transactions', exact: true })).toBeDisabled();

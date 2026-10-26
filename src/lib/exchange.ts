@@ -1,4 +1,4 @@
-import { currencies, currencyOf, dateSchema, exchangeRateSchema, localDate, minorUnit, type Currency, type ExchangeRate, type FinanceData } from './finance';
+import { accountBalance, currencies, currencyOf, dateSchema, exchangeRateSchema, fxQuoteSchema, localDate, minorUnit, type Currency, type ExchangeRate, type FinanceData, type FxQuote, type Transaction } from './finance';
 
 const safeLimit = BigInt(Number.MAX_SAFE_INTEGER);
 function safeNumber(value: bigint): number {
@@ -19,6 +19,56 @@ export function convertMinorUnits(amount: number | bigint, rate: ExchangeRate): 
   const absolute = numerator < 0n ? -numerator : numerator;
   const rounded = (absolute + denominator / 2n) / denominator;
   return safeNumber(numerator < 0n ? -rounded : rounded);
+}
+
+function quoteAmount(amount: number, quote: FxQuote, target: Currency): number {
+  return convertMinorUnits(amount, { id: 'automatic', source: quote.source, target, rate: quote.rates[target], asOf: quote.asOf });
+}
+
+/** Historical flows use only the immutable snapshot attached to the native transaction. */
+export function transactionReportingAmount(data: FinanceData, transaction: Transaction, target: Currency): number | null {
+  const account = data.accounts.find(a => a.id === transaction.accountId);
+  if (!account) return null;
+  if (currencyOf(account) === target) return transaction.amount;
+  const quote = transaction.fx;
+  if (!quote || !fxQuoteSchema.safeParse(quote).success || quote.source !== currencyOf(account) || quote.date !== transaction.date) return null;
+  try { return quoteAmount(transaction.amount, quote, target); } catch { return null; }
+}
+
+/** Chart-only projection, never a replacement for the native ledger. */
+export function historicalReportingData(data: FinanceData, target: Currency): FinanceData | null {
+  const transactions: Transaction[] = [];
+  for (const transaction of data.transactions) {
+    if (transaction.type === 'transfer') {
+      const source = data.accounts.find(a => a.id === transaction.accountId);
+      const destination = data.accounts.find(a => a.id === transaction.toAccountId);
+      if (!source || !destination || currencyOf(source) !== currencyOf(destination)) return null;
+      continue;
+    }
+    const amount = transactionReportingAmount(data, transaction, target);
+    if (amount === null) return null;
+    const { fx: _fx, ...native } = transaction;
+    transactions.push({ ...native, amount });
+  }
+  return { accounts: data.accounts.map(a => ({ ...a, currency: target, openingBalance: 0 })), categories: data.categories,
+    ...(data.primaryAccountId ? { primaryAccountId: data.primaryAccountId } : {}), transactions, budgets: [] };
+}
+
+/** Current holdings use the latest supplied daily quote, including archived accounts. */
+export function currentReportingBalance(data: FinanceData, target: Currency, quotes: FxQuote[]): number | null {
+  let balance = 0n;
+  try {
+    for (const account of data.accounts) {
+      const native = accountBalance(data, account.id);
+      const source = currencyOf(account);
+      if (source === target) { balance += integer(native); continue; }
+      const quote = quotes.filter(q => q.source === source && fxQuoteSchema.safeParse(q).success)
+        .sort((a, b) => b.date.localeCompare(a.date) || b.asOf.localeCompare(a.asOf))[0];
+      if (!quote) return null;
+      balance += integer(quoteAmount(native, quote, target));
+    }
+    return safeNumber(balance);
+  } catch { return null; }
 }
 
 /** Calendar-day age relative to the device's local date; no network clock. */

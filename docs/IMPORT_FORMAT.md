@@ -1,4 +1,14 @@
-# Manual CSV import format
+# Manual spreadsheet import format
+
+## Excel workbook (recommended)
+
+Choose **Settings → Import spreadsheet → Download XLSX template**. The workbook includes a `Transactions` sheet with typed dates/numbers and income/expense examples, an `Instructions` sheet, and a `Reference` sheet mapping your active account/category IDs to names and currencies. Dropdowns use these workspace IDs. Replace or delete the examples before importing; keep the seven headers unchanged.
+
+Save as `.xlsx` and upload it in the same dialog. Only `Transactions` is imported. Dates must be real Excel dates or ISO text dates; amounts must be numeric cells, not numeric text. Other fields must be text. Formula, error, hyperlink and rich-text cells are rejected, even if a cached value is present. Date formatting and dropdown/positive-number validation cover rows 2–10001, but pasting can bypass spreadsheet rules: Almond revalidates cell types, monetary precision, references, duplicates and ledger limits before saving.
+
+XLSX files are limited to 2 MiB compressed, 20 MiB expanded ZIP content, 1,000 ZIP entries and 10,000 data rows. Encrypted workbooks and legacy `.xls`/`.xlsm` files are not supported. Download a fresh template after changing accounts or categories. CSV compatibility and the shared validation/confirmation rules are documented below.
+
+## CSV compatibility
 
 Almond accepts one strict canonical format, not arbitrary bank or Cashew exports. Reshape other exports into the columns below before choosing a file. There is no automatic column mapping, Google OAuth, Sheets connection, scheduled sync, or bank adapter.
 
@@ -42,7 +52,7 @@ No transactions are written while parsing or previewing. On confirmation all sel
 
 ## Integration contract
 
-`CsvImport` in `src/components/csv-import.tsx` accepts `data: FinanceData`, `onClose: () => void`, and `onImport: (transactions: Transaction[]) => Promise<void>`. It never mutates `data`. The component is provided separately; the parent application must wire its entry point and persistence callback.
+`CsvImport` in `src/components/csv-import.tsx` accepts `data: FinanceData`, `onClose: () => void`, and `onImport: (transactions: Transaction[]) => Promise<void>`. It never mutates `data`. The parent application wires its entry point and persistence callback. XLSX parsing is lazy-loaded from `src/lib/xlsx-import.ts` and uses the same row-validation pipeline.
 
 **The callback must validate inside the atomic store mutation, against its latest data, not only against the UI snapshot.** Use the exported helper from `src/lib/csv-import.ts`:
 
